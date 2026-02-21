@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "faces"
+version = "0.1.0"
+description = "Find people in a personal photo collection"
+requires-python = ">=3.10"
+dependencies = [
+    "click>=8.0",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+faces = "faces.cli:cli"
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov"]

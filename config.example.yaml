@@ -1,0 +1,12 @@
+# faces configuration file
+# Copy to ~/.config/faces/config.yaml and adjust as needed.
+
+# Path to the SQLite index database.
+database: ~/.local/share/faces/index.db
+
+# Default directory to scan for photos.
+photos_dir: ~/Photos
+
+# Similarity threshold for face clustering (0.0–1.0).
+# Lower values group more faces together; higher values are more strict.
+cluster_threshold: 0.6
