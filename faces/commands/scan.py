@@ -1,6 +1,21 @@
+from pathlib import Path
+
 import click
 
 from ..config import Config
+
+
+JPEG_PATTERNS = ("*.jpg", "*.jpeg", "*.JPG", "*.JPEG")
+
+
+def scan_photo(cfg: Config, path: Path, force: bool) -> None:
+    from ..scanner import get_face_embeddings
+
+    print(path)
+    for emb in get_face_embeddings(path):
+        values = emb.tolist()
+        preview = ", ".join(f"{v:.4f}" for v in values[:3])
+        print(f"  [{preview}, ...]")
 
 
 @click.command()
@@ -18,16 +33,13 @@ def scan(cfg: Config, photos_dir: str | None, recursive: bool, force: bool) -> N
     New faces are appended to the index; existing entries are skipped unless
     --force is given.
     """
-    from pathlib import Path
-
     target = Path(photos_dir) if photos_dir else cfg.photos_dir
     if target is None:
         raise click.UsageError(
             "Provide PHOTOS_DIR on the command line or set photos_dir in the config."
         )
 
-    click.echo(f"Scanning {target}")
-    click.echo(f"  database  : {cfg.database}")
-    click.echo(f"  recursive : {recursive}")
-    click.echo(f"  force     : {force}")
-    click.echo("[stub] scan is not yet implemented.")
+    glob = target.rglob if recursive else target.glob
+    for pattern in JPEG_PATTERNS:
+        for photo in sorted(glob(pattern)):
+            scan_photo(cfg, photo, force)
