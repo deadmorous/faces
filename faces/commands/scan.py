@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import click
@@ -8,14 +9,35 @@ from ..config import Config
 JPEG_PATTERNS = ("*.jpg", "*.jpeg", "*.JPG", "*.JPEG")
 
 
-def scan_photo(cfg: Config, path: Path, force: bool) -> None:
-    from ..scanner import get_face_embeddings
+def scan_photo(cfg: Config, path: Path, force: bool,
+               debug_crops_dir: Path | None = None) -> None:
+    from ..scanner import detect_faces
 
+    detections = detect_faces(path)
     print(path)
-    for emb in get_face_embeddings(path):
-        values = emb.tolist()
-        preview = ", ".join(f"{v:.4f}" for v in values[:3])
+    for d in detections:
+        preview = ", ".join(f"{v:.4f}" for v in d.embedding.tolist()[:3])
         print(f"  [{preview}, ...]")
+
+    if debug_crops_dir is not None:
+        img_w, img_h = detections[0].image_size if detections else _image_size(path)
+        data = {
+            "photo": str(path),
+            "width": img_w,
+            "height": img_h,
+            "faces": [
+                {"bbox": d.bbox, "score": round(d.score, 4)}
+                for d in detections
+            ],
+        }
+        out = debug_crops_dir / (path.stem + ".json")
+        out.write_text(json.dumps(data, indent=2))
+
+
+def _image_size(path: Path) -> tuple[int, int]:
+    from PIL import Image
+    with Image.open(path) as img:
+        return img.size  # (width, height)
 
 
 @click.command()
@@ -25,8 +47,12 @@ def scan_photo(cfg: Config, path: Path, force: bool) -> None:
               help="Descend into subdirectories.")
 @click.option("--force", is_flag=True,
               help="Re-index photos that are already in the database.")
+@click.option("--debug-crops", "debug_crops_dir", metavar="DIR",
+              type=click.Path(file_okay=False, writable=True, resolve_path=True),
+              help="Write a JSON file with face bounding boxes for each photo to DIR.")
 @click.pass_obj
-def scan(cfg: Config, photos_dir: str | None, recursive: bool, force: bool) -> None:
+def scan(cfg: Config, photos_dir: str | None, recursive: bool, force: bool,
+         debug_crops_dir: str | None) -> None:
     """Detect and index faces found in PHOTOS_DIR.
 
     When PHOTOS_DIR is omitted the value from the configuration file is used.
@@ -39,7 +65,11 @@ def scan(cfg: Config, photos_dir: str | None, recursive: bool, force: bool) -> N
             "Provide PHOTOS_DIR on the command line or set photos_dir in the config."
         )
 
+    dbg = Path(debug_crops_dir) if debug_crops_dir else None
+    if dbg is not None:
+        dbg.mkdir(parents=True, exist_ok=True)
+
     glob = target.rglob if recursive else target.glob
     for pattern in JPEG_PATTERNS:
         for photo in sorted(glob(pattern)):
-            scan_photo(cfg, photo, force)
+            scan_photo(cfg, photo, force, dbg)

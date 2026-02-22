@@ -1,5 +1,6 @@
 """Face detection and embedding extraction."""
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -9,6 +10,14 @@ import torchvision.transforms as T
 from facenet_pytorch import InceptionResnetV1
 from PIL import Image
 from retinaface.pre_trained_models import get_model
+
+
+@dataclass
+class FaceDetection:
+    bbox: list[int]        # [x1, y1, x2, y2] in original image coordinates
+    score: float           # detector confidence (0–1)
+    embedding: torch.Tensor  # 512-d, on CPU
+    image_size: tuple[int, int]  # (width, height) of the source image
 
 CONFIDENCE_THRESHOLD = 0.7  # RetinaFace confidence (0–1)
 FACE_MARGIN = 20             # extra pixels added around each bounding box
@@ -49,14 +58,15 @@ def _crop_face(img: Image.Image, bbox: list[int]) -> Image.Image:
     return img.crop((x1, y1, x2, y2))
 
 
-def get_face_embeddings(image_path: Path) -> list[torch.Tensor]:
-    """Return a 512-d embedding tensor for every face detected in *image_path*.
+def detect_faces(image_path: Path) -> list[FaceDetection]:
+    """Detect all faces in *image_path* and return their embeddings and metadata.
 
     Detections with confidence below CONFIDENCE_THRESHOLD are discarded.
     Returns an empty list when no faces are found.
     """
     detector, resnet = _models()
     img = Image.open(image_path).convert("RGB")
+    image_size = img.size  # (width, height)
     annotations = detector.predict_jsons(
         np.array(img), confidence_threshold=CONFIDENCE_THRESHOLD
     )
@@ -74,4 +84,12 @@ def get_face_embeddings(image_path: Path) -> list[torch.Tensor]:
     with torch.no_grad():
         embeddings = resnet(crops.to(device))  # [n, 512]
 
-    return [embeddings[i].cpu() for i in range(len(embeddings))]
+    return [
+        FaceDetection(
+            bbox=a["bbox"],
+            score=float(a["score"]),
+            embedding=embeddings[i].cpu(),
+            image_size=image_size,
+        )
+        for i, a in enumerate(faces_found)
+    ]
