@@ -30,9 +30,12 @@ _face_transform = T.Compose([
 def _models():
     global _detector, _resnet
     if _detector is None:
-        _detector = get_model("resnet50_2020-07-20", max_size=1280, device=str(device))
-        _detector.eval()
-        _resnet = InceptionResnetV1(pretrained="vggface2").eval().to(device)
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            _detector = get_model("resnet50_2020-07-20", max_size=1280, device=str(device))
+            _detector.eval()
+            _resnet = InceptionResnetV1(pretrained="vggface2").eval().to(device)
     return _detector, _resnet
 
 
