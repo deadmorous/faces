@@ -10,12 +10,12 @@ from ..db import Database, compute_md5, open_db, photo_is_indexed, store_detecti
 JPEG_PATTERNS = ("*.jpg", "*.jpeg", "*.JPG", "*.JPEG")
 
 
-def scan_photo(db: Database, path: Path, force: bool,
+def scan_photo(db: Database, root: Path, path: Path, force: bool,
                debug_crops_dir: Path | None = None) -> None:
     from ..scanner import detect_faces
 
     md5 = compute_md5(path)
-    if not force and photo_is_indexed(db, path, md5):
+    if not force and photo_is_indexed(db, md5):
         return
 
     detections = detect_faces(path)
@@ -24,8 +24,8 @@ def scan_photo(db: Database, path: Path, force: bool,
         preview = ", ".join(f"{v:.4f}" for v in d.embedding.tolist()[:3])
         print(f"  [{preview}, ...]")
 
-    store_photo(db, path, md5, len(detections))
-    store_detections(db, path, detections)
+    store_photo(db, path.relative_to(root), md5, len(detections))
+    store_detections(db, md5, detections)
 
     if debug_crops_dir is not None:
         img_w, img_h = detections[0].image_size if detections else _image_size(path)
@@ -73,6 +73,11 @@ def scan(cfg: Config, photos_dir: str | None, recursive: bool, force: bool,
             "Provide PHOTOS_DIR on the command line or set photos_dir in the config."
         )
 
+    # Root is the reference point for relative paths stored in the database.
+    # cfg.photos_dir is preferred so that scanning a subdirectory still produces
+    # paths like "2024/IMG_001.JPG" rather than bare filenames.
+    root = cfg.photos_dir if cfg.photos_dir else target
+
     db = open_db(cfg.database)
 
     dbg = Path(debug_crops_dir) if debug_crops_dir else None
@@ -82,4 +87,4 @@ def scan(cfg: Config, photos_dir: str | None, recursive: bool, force: bool,
     glob = target.rglob if recursive else target.glob
     for pattern in JPEG_PATTERNS:
         for photo in sorted(glob(pattern)):
-            scan_photo(db, photo, force, dbg)
+            scan_photo(db, root, photo, force, dbg)
