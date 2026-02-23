@@ -25,6 +25,7 @@ Key runtime dependencies are **not listed in `pyproject.toml`** (only `click` an
 - `facenet-pytorch` — provides `InceptionResnetV1` for 512-d face embeddings
 - `retinaface-pytorch` — face detector (`resnet50_2020-07-20` weights, auto-downloaded on first run to `~/.cache/torch/hub/`)
 - `Pillow`, `numpy` (<2.0), `matplotlib`
+- `lancedb` — vector database for storing embeddings and scan history
 
 **numpy must stay below 2.0** — `retinaface-pytorch` pulls in numpy 2.x which breaks the torch↔numpy bridge. Pin with `pip install "numpy<2.0.0"` if it gets upgraded.
 
@@ -34,8 +35,8 @@ Key runtime dependencies are **not listed in `pyproject.toml`** (only `click` an
 
 ```
 JPEG files → detect_faces() → FaceDetection(bbox, score, embedding, image_size)
-                                     ↓                    ↓
-                              printed to stdout     written to JSON (--debug-crops)
+                                     ↓                    ↓                    ↓
+                              printed to stdout     LanceDB (db.py)     JSON (--debug-crops)
 ```
 
 ### `faces/scanner.py` — the ML core
@@ -48,6 +49,15 @@ Central module. Contains:
 ### Configuration (`faces/config.py`)
 
 `Config` dataclass with fields: `database`, `photos_dir`, `cluster_threshold`. `load()` searches for config files in order: `~/.config/faces/config.yaml` → `~/.faces.yaml` → `./faces.yaml`. CLI options passed to the group always override config file values. The `Config` object is stored in Click's `ctx.obj` and passed to every subcommand via `@click.pass_obj`.
+
+### `faces/db.py` — LanceDB storage
+
+Two tables, both opened once per `scan` run via `open_db(cfg.database)` (which is a directory):
+
+- **`photos`** — one row per scanned file: `path`, `md5`, `scanned_at`, `face_count`. Used by `photo_is_indexed()` to skip files on re-runs, including photos where no faces were found.
+- **`faces`** — one row per detected face: `photo` (path), `bbox`, `score`, `embedding` (512-d float32).
+
+The MD5 check means a file that changes on disk (same path, new content) is correctly re-indexed.
 
 ### Commands (`faces/commands/`)
 
