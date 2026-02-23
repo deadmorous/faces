@@ -14,7 +14,7 @@ Common invocations:
 ```bash
 python -m faces scan ~/Photos
 python -m faces scan --debug-crops /tmp/dbg ~/Photos
-python view_crops.py ~/Photos/IMG_9579.JPG /tmp/dbg
+python view_crops.py ~/Photos/IMG_9579.JPG
 ```
 
 ## Dependencies
@@ -55,9 +55,9 @@ Central module. Contains:
 Two tables, both opened once per `scan` run via `open_db(cfg.database)` (which is a directory):
 
 - **`photos`** — one row per scanned file: `path`, `md5`, `scanned_at`, `face_count`. Used by `photo_is_indexed()` to skip files on re-runs, including photos where no faces were found.
-- **`faces`** — one row per detected face: `photo` (path), `bbox`, `score`, `embedding` (512-d float32).
+- **`faces`** — one row per detected face: `md5` (photo reference), `bbox`, `score`, `embedding` (512-d float32).
 
-The MD5 check means a file that changes on disk (same path, new content) is correctly re-indexed.
+`photos.path` is stored **relative to `cfg.photos_dir`** (the root). Moving the entire collection only requires updating the root in config — the database stays valid. `photo_is_indexed()` checks by MD5 only, so a renamed or moved file with identical content is not re-scanned. The `scan` command uses `cfg.photos_dir` as root when set, falling back to the scan target directory.
 
 ### Commands (`faces/commands/`)
 
@@ -65,7 +65,7 @@ Each command is a standalone module with a Click-decorated function. `clusterize
 
 ### `view_crops.py` — standalone visualisation utility
 
-Not part of the `faces` package. Takes `PHOTO CROPS_DIR` on the command line, reads `CROPS_DIR/{photo_stem}.json`, and displays boxes with confidence scores via matplotlib.
+Not part of the `faces` package. Takes `PHOTO [DB_PATH]` on the command line, computes the photo's MD5, queries the `faces` table, and displays boxes with confidence scores via matplotlib. `DB_PATH` defaults to `~/.local/share/faces/index.db`.
 
 ## Debug crops JSON format
 
