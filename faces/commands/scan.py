@@ -4,20 +4,28 @@ from pathlib import Path
 import click
 
 from ..config import Config
+from ..db import Database, compute_md5, open_db, photo_is_indexed, store_detections, store_photo
 
 
 JPEG_PATTERNS = ("*.jpg", "*.jpeg", "*.JPG", "*.JPEG")
 
 
-def scan_photo(cfg: Config, path: Path, force: bool,
+def scan_photo(db: Database, path: Path, force: bool,
                debug_crops_dir: Path | None = None) -> None:
     from ..scanner import detect_faces
+
+    md5 = compute_md5(path)
+    if not force and photo_is_indexed(db, path, md5):
+        return
 
     detections = detect_faces(path)
     print(path)
     for d in detections:
         preview = ", ".join(f"{v:.4f}" for v in d.embedding.tolist()[:3])
         print(f"  [{preview}, ...]")
+
+    store_photo(db, path, md5, len(detections))
+    store_detections(db, path, detections)
 
     if debug_crops_dir is not None:
         img_w, img_h = detections[0].image_size if detections else _image_size(path)
@@ -65,6 +73,8 @@ def scan(cfg: Config, photos_dir: str | None, recursive: bool, force: bool,
             "Provide PHOTOS_DIR on the command line or set photos_dir in the config."
         )
 
+    db = open_db(cfg.database)
+
     dbg = Path(debug_crops_dir) if debug_crops_dir else None
     if dbg is not None:
         dbg.mkdir(parents=True, exist_ok=True)
@@ -72,4 +82,4 @@ def scan(cfg: Config, photos_dir: str | None, recursive: bool, force: bool,
     glob = target.rglob if recursive else target.glob
     for pattern in JPEG_PATTERNS:
         for photo in sorted(glob(pattern)):
-            scan_photo(cfg, photo, force, dbg)
+            scan_photo(db, photo, force, dbg)
