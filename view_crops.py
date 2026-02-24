@@ -19,14 +19,16 @@ DEFAULT_DB = Path("~/.local/share/faces/index.db").expanduser()
 
 
 def main(photo_path: Path, db_path: Path) -> None:
+    from faces.db import compute_md5
+    md5 = compute_md5(photo_path)
+
     conn = lancedb.connect(db_path)
     try:
         table = conn.open_table("faces")
     except Exception:
         sys.exit(f"No faces table found in database: {db_path}")
 
-    escaped = str(photo_path.resolve()).replace("'", "''")
-    rows = table.search().where(f"photo = '{escaped}'", prefilter=True).to_list()
+    rows = table.search().where(f"md5 = '{md5}'", prefilter=True).to_list()
 
     if not rows:
         sys.exit(f"No detections found for: {photo_path}")
