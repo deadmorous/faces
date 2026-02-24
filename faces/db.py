@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import lancedb
+import numpy as np
 import pyarrow as pa
 
 from .scanner import FaceDetection
@@ -24,11 +25,20 @@ _FACES_SCHEMA = pa.schema([
     pa.field("embedding", pa.list_(pa.float32(), 512)),
 ])
 
+_CLUSTERS_SCHEMA = pa.schema([
+    pa.field("md5",          pa.utf8()),
+    pa.field("bbox",         pa.list_(pa.int32(), 4)),
+    pa.field("cluster_id",   pa.int32()),
+    pa.field("name",         pa.utf8()),
+    pa.field("clustered_at", pa.timestamp("us", tz="UTC")),
+])
+
 
 @dataclass
 class Database:
     photos: lancedb.table.Table
     faces: lancedb.table.Table
+    clusters: lancedb.table.Table
 
 
 def open_db(db_path: Path) -> Database:
@@ -37,6 +47,7 @@ def open_db(db_path: Path) -> Database:
     return Database(
         photos=conn.create_table("photos", schema=_PHOTOS_SCHEMA, exist_ok=True),
         faces=conn.create_table("faces", schema=_FACES_SCHEMA, exist_ok=True),
+        clusters=conn.create_table("clusters", schema=_CLUSTERS_SCHEMA, exist_ok=True),
     )
 
 
@@ -81,3 +92,32 @@ def store_detections(db: Database, md5: str,
         }
         for d in detections
     ])
+
+
+def load_all_embeddings(db: Database) -> tuple[list[dict], np.ndarray]:
+    """Return (rows, X) where rows has md5+bbox and X is shape (N, 512) float32."""
+    all_rows = db.faces.search().limit(10_000_000).to_list()
+    if not all_rows:
+        return [], np.empty((0, 512), dtype=np.float32)
+    rows = [{"md5": r["md5"], "bbox": r["bbox"]} for r in all_rows]
+    X = np.array([r["embedding"] for r in all_rows], dtype=np.float32)
+    return rows, X
+
+
+def store_clusters(db: Database, rows: list[dict], labels: np.ndarray) -> None:
+    """Write one cluster row per face."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    db.clusters.add([
+        {
+            "md5": row["md5"],
+            "bbox": row["bbox"],
+            "cluster_id": int(label),
+            "name": None,
+            "clustered_at": now,
+        }
+        for row, label in zip(rows, labels)
+    ])
+
+
+def reset_clusters(db: Database) -> None:
+    db.clusters.delete("1=1")
