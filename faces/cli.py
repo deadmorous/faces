@@ -6,6 +6,7 @@ from .commands.list_clusters import list_clusters
 from .commands.rename import rename
 from .commands.scan import scan
 from .commands.show import show
+from .commands.stick import stick
 
 
 @click.group()
@@ -52,4 +53,5 @@ cli.add_command(scan)
 cli.add_command(clusterize)
 cli.add_command(list_clusters)
 cli.add_command(rename)
+cli.add_command(stick)
 cli.add_command(show)

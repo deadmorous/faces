@@ -54,11 +54,12 @@ def clusterize(cfg: Config, threshold: float | None, reset: bool) -> None:
         linkage="complete",
     ).fit_predict(X)
 
-    store_clusters(db, rows, labels)
+    auto_named = store_clusters(db, rows, labels)
 
     counts = Counter(labels)
     n_clusters = len(counts)
-    click.echo(f"Done. {n_clusters} clusters found.")
+    click.echo(f"Done. {n_clusters} clusters found"
+               + (f", {auto_named} auto-labeled from sticky faces." if auto_named else "."))
 
     top = counts.most_common(10)
     if top:
