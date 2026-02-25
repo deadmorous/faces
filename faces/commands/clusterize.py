@@ -2,7 +2,7 @@ import math
 from collections import Counter
 
 import click
-from sklearn.cluster import DBSCAN
+from sklearn.cluster import AgglomerativeClustering
 
 from ..config import Config
 from ..db import load_all_embeddings, open_db, reset_clusters, store_clusters
@@ -47,11 +47,11 @@ def clusterize(cfg: Config, threshold: float | None, reset: bool) -> None:
     click.echo(f"  threshold : {effective_threshold:.2f}  (eps {eps:.4f})")
     click.echo()
 
-    labels = DBSCAN(
-        eps=eps,
-        min_samples=1,
+    labels = AgglomerativeClustering(
+        n_clusters=None,
+        distance_threshold=eps,
         metric="euclidean",
-        algorithm="ball_tree",
+        linkage="complete",
     ).fit_predict(X)
 
     store_clusters(db, rows, labels)
