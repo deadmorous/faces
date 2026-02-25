@@ -36,7 +36,8 @@ def list_clusters(cfg: Config, min_size: int, max_size: int | None) -> None:
         for cid in sizes
         if sizes[cid] >= min_size and (max_size is None or sizes[cid] <= max_size)
     ]
-    clusters.sort(key=lambda x: x[1], reverse=True)
+    clusters.sort(key=lambda x: x[0])           # primary: id ascending
+    clusters.sort(key=lambda x: x[1], reverse=True)  # secondary: size descending (stable)
 
     if not clusters:
         click.echo("No clusters match the given filters.")
