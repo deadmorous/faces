@@ -3,6 +3,7 @@ from collections import Counter
 
 import click
 from sklearn.cluster import AgglomerativeClustering
+from sklearn.metrics import pairwise_distances
 
 from ..config import Config
 from ..db import load_all_embeddings, open_db, reset_clusters, store_clusters
@@ -47,12 +48,37 @@ def clusterize(cfg: Config, threshold: float | None, reset: bool) -> None:
     click.echo(f"  threshold : {effective_threshold:.2f}  (eps {eps:.4f})")
     click.echo()
 
-    labels = AgglomerativeClustering(
-        n_clusters=None,
-        distance_threshold=eps,
-        metric="euclidean",
-        linkage="complete",
-    ).fit_predict(X)
+    names = [row["name"] for row in rows]
+    if any(names):
+        D = pairwise_distances(X, metric="euclidean")
+        must_link = cannot_link = 0
+        for i in range(len(rows)):
+            if not names[i]:
+                continue
+            for j in range(i + 1, len(rows)):
+                if not names[j]:
+                    continue
+                if names[i] == names[j]:
+                    D[i, j] = D[j, i] = 0.0
+                    must_link += 1
+                else:
+                    D[i, j] = D[j, i] = 2.0
+                    cannot_link += 1
+        click.echo(f"  constraints: {must_link} must-link, {cannot_link} cannot-link pairs")
+        click.echo()
+        labels = AgglomerativeClustering(
+            n_clusters=None,
+            distance_threshold=eps,
+            metric="precomputed",
+            linkage="complete",
+        ).fit_predict(D)
+    else:
+        labels = AgglomerativeClustering(
+            n_clusters=None,
+            distance_threshold=eps,
+            metric="euclidean",
+            linkage="complete",
+        ).fit_predict(X)
 
     auto_named = store_clusters(db, rows, labels)
 
