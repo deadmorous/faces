@@ -1,6 +1,7 @@
 import click
 
 from . import config as _config
+from .commands.classify import classify
 from .commands.clusterize import clusterize
 from .commands.label import label
 from .commands.list_clusters import list_clusters
@@ -52,6 +53,7 @@ def cli(ctx: click.Context, config_file: str | None, db: str | None,
 
 cli.add_command(scan)
 cli.add_command(clusterize)
+cli.add_command(classify)
 cli.add_command(list_clusters)
 cli.add_command(label)
 cli.add_command(rename)

@@ -160,6 +160,17 @@ def stick_faces(db: Database, cluster_id: int, name: str) -> int:
     return len(cluster_rows)
 
 
+def stick_face(db: Database, md5: str, bbox: list[int], name: str) -> None:
+    """Stamp name onto a single face row identified by (md5, bbox)."""
+    x1, y1, x2, y2 = bbox
+    db.faces.update(
+        where=(f"md5 = '{md5}' AND "
+               f"bbox[1] = {x1} AND bbox[2] = {y1} AND "
+               f"bbox[3] = {x2} AND bbox[4] = {y2}"),
+        values={"name": name},
+    )
+
+
 def unstick_faces(db: Database, name: str) -> int:
     """Clear the sticky label *name* from all face rows. Returns count cleared."""
     count = db.faces.count_rows(f"name = '{name}'")

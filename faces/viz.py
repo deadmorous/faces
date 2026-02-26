@@ -100,3 +100,36 @@ def show_cluster(cluster_id: int, clusters_table, photos_table,
         plt.pause(0.1)   # ensure the window renders before returning
 
     return len(thumbs)
+
+
+def show_face(md5: str, bbox, photos_table, photos_dir: Path | None,
+              title: str = "", block: bool = False) -> bool:
+    """Show a single face crop. Returns True if image loaded successfully."""
+    rows = (
+        photos_table.search()
+        .where(f"md5 = '{md5}'", prefilter=True)
+        .limit(1)
+        .to_list()
+    )
+    if not rows:
+        return False
+    rel = rows[0]["path"]
+    photo_path = (photos_dir / rel) if photos_dir else Path(rel)
+    if not photo_path.exists():
+        return False
+    try:
+        img = Image.open(photo_path).convert("RGB")
+    except Exception:
+        return False
+
+    thumb = crop_face(img, bbox)
+    fig, ax = plt.subplots(1, 1, figsize=(2.5, 2.5))
+    ax.imshow(np.array(thumb))
+    ax.axis("off")
+    if title:
+        fig.suptitle(title, fontsize=10)
+    plt.tight_layout()
+    plt.show(block=block)
+    if not block:
+        plt.pause(0.1)
+    return True
