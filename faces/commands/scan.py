@@ -4,18 +4,30 @@ from pathlib import Path
 import click
 
 from ..config import Config
-from ..db import Database, compute_md5, open_db, photo_is_indexed, store_detections, store_photo
+from ..db import (Database, compute_md5, load_stat_index, open_db,
+                  photo_is_indexed, store_detections, store_photo,
+                  update_photo_stat)
 
 
 JPEG_PATTERNS = ("*.jpg", "*.jpeg", "*.JPG", "*.JPEG")
 
 
 def scan_photo(db: Database, root: Path, path: Path, force: bool,
+               stat_index: set,
                debug_crops_dir: Path | None = None) -> None:
     from ..scanner import detect_faces
 
+    stat = path.stat()
+    filename  = path.name
+    file_size = stat.st_size
+    mtime     = stat.st_mtime
+
+    if not force and (filename, file_size, mtime) in stat_index:
+        return                                   # fast path — in-memory lookup
+
     md5 = compute_md5(path)
     if not force and photo_is_indexed(db, md5):
+        update_photo_stat(db, md5, filename, file_size, mtime)  # backfill
         return
 
     detections = detect_faces(path)
@@ -24,7 +36,8 @@ def scan_photo(db: Database, root: Path, path: Path, force: bool,
         preview = ", ".join(f"{v:.4f}" for v in d.embedding.tolist()[:3])
         print(f"  [{preview}, ...]")
 
-    store_photo(db, path.relative_to(root), md5, len(detections))
+    store_photo(db, path.relative_to(root), md5, len(detections),
+                filename, file_size, mtime)
     store_detections(db, md5, detections)
 
     if debug_crops_dir is not None:
@@ -79,6 +92,7 @@ def scan(cfg: Config, photos_dir: str | None, recursive: bool, force: bool,
     root = cfg.photos_dir if cfg.photos_dir else target
 
     db = open_db(cfg.database)
+    stat_index = load_stat_index(db)
 
     dbg = Path(debug_crops_dir) if debug_crops_dir else None
     if dbg is not None:
@@ -87,4 +101,4 @@ def scan(cfg: Config, photos_dir: str | None, recursive: bool, force: bool,
     glob = target.rglob if recursive else target.glob
     for pattern in JPEG_PATTERNS:
         for photo in sorted(glob(pattern)):
-            scan_photo(db, root, photo, force, dbg)
+            scan_photo(db, root, photo, force, stat_index, dbg)

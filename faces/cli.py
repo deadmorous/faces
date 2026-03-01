@@ -4,6 +4,7 @@ from . import config as _config
 from .commands.classify import classify
 from .commands.clusterize import clusterize
 from .commands.label import label
+from .commands.migrate import migrate
 from .commands.list_clusters import list_clusters
 from .commands.rename import rename
 from .commands.scan import scan
@@ -51,6 +52,7 @@ def cli(ctx: click.Context, config_file: str | None, db: str | None,
     ctx.obj = cfg
 
 
+cli.add_command(migrate)
 cli.add_command(scan)
 cli.add_command(clusterize)
 cli.add_command(classify)

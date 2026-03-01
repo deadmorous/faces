@@ -17,6 +17,9 @@ _PHOTOS_SCHEMA = pa.schema([
     pa.field("md5", pa.utf8()),
     pa.field("scanned_at", pa.timestamp("us", tz="UTC")),
     pa.field("face_count", pa.int32()),
+    pa.field("filename",  pa.utf8()),
+    pa.field("file_size", pa.int64()),
+    pa.field("mtime",     pa.float64()),   # st_mtime: seconds since epoch
 ])
 
 _FACES_SCHEMA = pa.schema([
@@ -43,17 +46,31 @@ class Database:
     clusters: lancedb.table.Table
 
 
+def _open_or_create(conn, name: str, schema):
+    """Open an existing table by name, or create it if it doesn't exist."""
+    if name in conn.table_names():
+        return conn.open_table(name)
+    return conn.create_table(name, schema=schema)
+
+
 def open_db(db_path: Path) -> Database:
     db_path.mkdir(parents=True, exist_ok=True)
     conn = lancedb.connect(db_path)
-    faces_table = conn.create_table("faces", schema=_FACES_SCHEMA, exist_ok=True)
+    faces_table = _open_or_create(conn, "faces", _FACES_SCHEMA)
     # Migrate: add sticky name column if the table pre-dates this feature.
     if "name" not in faces_table.schema.names:
-        faces_table.add_columns({"name": "CAST(NULL AS VARCHAR)"})
+        faces_table.add_columns({"name": "CAST(NULL AS string)"})
+    photos_table = _open_or_create(conn, "photos", _PHOTOS_SCHEMA)
+    if "filename" not in photos_table.schema.names:
+        photos_table.add_columns({
+            "filename":  "CAST(NULL AS string)",
+            "file_size": "CAST(NULL AS bigint)",
+            "mtime":     "CAST(NULL AS double)",
+        })
     return Database(
-        photos=conn.create_table("photos", schema=_PHOTOS_SCHEMA, exist_ok=True),
+        photos=photos_table,
         faces=faces_table,
-        clusters=conn.create_table("clusters", schema=_CLUSTERS_SCHEMA, exist_ok=True),
+        clusters=_open_or_create(conn, "clusters", _CLUSTERS_SCHEMA),
     )
 
 
@@ -76,13 +93,40 @@ def photo_is_indexed(db: Database, md5: str) -> bool:
     return len(hits) > 0
 
 
-def store_photo(db: Database, relative_path: Path, md5: str, face_count: int) -> None:
+def load_stat_index(db: Database) -> set[tuple[str, int, float]]:
+    """Return a set of (filename, file_size, mtime) for all fully-statted rows.
+
+    Callers can do O(1) membership tests instead of per-file DB queries.
+    """
+    rows = (
+        db.photos.search()
+        .where("filename IS NOT NULL", prefilter=True)
+        .limit(10_000_000)
+        .to_list()
+    )
+    return {(r["filename"], r["file_size"], r["mtime"]) for r in rows}
+
+
+def store_photo(db: Database, relative_path: Path, md5: str, face_count: int,
+                filename: str, file_size: int, mtime: float) -> None:
     db.photos.add([{
         "path": str(relative_path),
         "md5": md5,
         "scanned_at": datetime.datetime.now(datetime.timezone.utc),
         "face_count": face_count,
+        "filename": filename,
+        "file_size": file_size,
+        "mtime": mtime,
     }])
+
+
+def update_photo_stat(db: Database, md5: str,
+                      filename: str, file_size: int, mtime: float) -> None:
+    safe_name = filename.replace("'", "''")
+    db.photos.update(
+        where=f"md5 = '{md5}'",
+        values={"filename": safe_name, "file_size": file_size, "mtime": mtime},
+    )
 
 
 def store_detections(db: Database, md5: str,
@@ -99,6 +143,16 @@ def store_detections(db: Database, md5: str,
         }
         for d in detections
     ])
+
+
+def load_unstatted_photos(db: Database) -> list[dict]:
+    """Return all photos rows where filename IS NULL (pre-migration rows)."""
+    return (
+        db.photos.search()
+        .where("filename IS NULL", prefilter=True)
+        .limit(10_000_000)
+        .to_list()
+    )
 
 
 def load_all_embeddings(db: Database) -> tuple[list[dict], np.ndarray]:
