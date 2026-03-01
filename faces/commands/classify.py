@@ -20,11 +20,13 @@ _STOP_WORDS = {"exit", "stop", "quit", "q"}
               help="Minimum labeled faces a named centroid must have to be used.")
 @click.pass_obj
 def classify(cfg: Config, threshold: float | None, min_size: int) -> None:
-    """Match unlabeled faces to known people via nearest-centroid classification.
+    """Match unlabeled faces to known people via single-linkage (min-dist) classification.
 
-    Named clusters whose sticky faces number >= MIN_SIZE are used as centroids.
-    Every unlabeled face closer than eps to any centroid is presented as a
-    candidate for acceptance, renaming, or skipping.
+    Named clusters whose sticky faces number >= MIN_SIZE are used. Each unlabeled
+    face is matched to the person whose nearest labeled face is closest (minimum
+    distance over all labeled faces for that person). Every unlabeled face closer
+    than eps to any person is presented as a candidate for acceptance, renaming,
+    or skipping.
 
     After classifying, run `faces clusterize --reset` to rebuild clusters.
     """
@@ -40,30 +42,32 @@ def classify(cfg: Config, threshold: float | None, min_size: int) -> None:
         click.echo("No faces found. Run `faces scan` first.")
         return
 
-    # --- Build named centroids ---
+    # --- Build named groups ---
     named_groups: dict[str, list[int]] = defaultdict(list)
     for i, row in enumerate(rows):
         if row.get("name"):
             named_groups[row["name"]].append(i)
 
-    centroids: dict[str, np.ndarray] = {}
-    for name, indices in named_groups.items():
-        if len(indices) >= min_size:
-            centroids[name] = X[indices].mean(axis=0)
+    valid_names = {
+        name for name, indices in named_groups.items()
+        if len(indices) >= min_size
+    }
 
-    if not centroids:
+    if not valid_names:
         click.echo(
-            f"No named centroids with >= {min_size} labeled faces found. "
+            f"No named people with >= {min_size} labeled faces found. "
             "Run `faces label --stick` or `faces stick` first."
         )
         return
+
+    person_names = sorted(valid_names)  # stable order, (P,)
 
     # --- Collect unlabeled faces ---
     unlabeled_indices = [i for i, row in enumerate(rows) if not row.get("name")]
 
     click.echo(
         f"Classifying {len(unlabeled_indices)} unlabeled faces against "
-        f"{len(centroids)} named centroids (eps {eps:.4f}) …"
+        f"{len(person_names)} named people (min-dist, eps {eps:.4f}) …"
     )
     click.echo()
 
@@ -71,17 +75,33 @@ def classify(cfg: Config, threshold: float | None, min_size: int) -> None:
         click.echo("All faces are already labeled.")
         return
 
-    # --- Find candidates within eps of any centroid ---
-    centroid_names = list(centroids.keys())
-    centroid_matrix = np.stack([centroids[n] for n in centroid_names])  # (C, 512)
+    # --- Gather ALL labeled faces for valid persons into one matrix ---
+    all_labeled_idx = [
+        i for i, row in enumerate(rows)
+        if row.get("name") in valid_names
+    ]
+    labeled_X = X[all_labeled_idx]                                  # (L, 512)
+    labeled_names_arr = [rows[i]["name"] for i in all_labeled_idx]  # (L,)
 
-    unlabeled_X = X[unlabeled_indices]  # (U, 512)
-    # Euclidean distances: (U, C)
-    diff = unlabeled_X[:, None, :] - centroid_matrix[None, :, :]
-    dists = np.sqrt((diff ** 2).sum(axis=2))
+    # Which columns in labeled_X belong to each person?
+    person_col_map = {
+        name: [j for j, n in enumerate(labeled_names_arr) if n == name]
+        for name in person_names
+    }
 
-    best_dist = dists.min(axis=1)        # (U,)
-    best_idx = dists.argmin(axis=1)      # (U,)
+    # Full pairwise distances (U, L)
+    unlabeled_X = X[unlabeled_indices]                              # (U, 512)
+    diff = unlabeled_X[:, None, :] - labeled_X[None, :, :]         # (U, L, 512)
+    D = np.sqrt((diff ** 2).sum(axis=2))                            # (U, L)
+
+    # Per-person minimum distance (U, P)
+    per_person = np.stack(
+        [D[:, person_col_map[name]].min(axis=1) for name in person_names],
+        axis=1,
+    )
+
+    best_idx = per_person.argmin(axis=1)                                       # (U,)
+    best_dist = per_person[np.arange(len(unlabeled_indices)), best_idx]        # (U,)
 
     candidate_mask = best_dist < eps
     candidate_positions = np.where(candidate_mask)[0]
@@ -101,7 +121,7 @@ def classify(cfg: Config, threshold: float | None, min_size: int) -> None:
     for rank, pos in enumerate(order, 1):
         face_idx = unlabeled_indices[pos]
         row = rows[face_idx]
-        matched_name = centroid_names[best_idx[pos]]
+        matched_name = person_names[best_idx[pos]]
         dist = float(best_dist[pos])
 
         click.echo(f"Candidate {rank}/{total_candidates}: {matched_name}  dist {dist:.2f}")
