@@ -8,7 +8,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from ..config import Config
-from ..db import load_all_embeddings, open_db, stick_face
+from ..db import (LABEL_FOREIGN, LABEL_NONFACE, SPECIAL_LABELS,
+                  load_all_embeddings, open_db, stick_face)
 
 _STOP_WORDS = {"exit", "stop", "quit", "q"}
 
@@ -50,7 +51,7 @@ def classify(cfg: Config, threshold: float | None, min_size: int) -> None:
 
     valid_names = {
         name for name, indices in named_groups.items()
-        if len(indices) >= min_size
+        if len(indices) >= min_size and name not in SPECIAL_LABELS
     }
 
     if not valid_names:
@@ -62,7 +63,7 @@ def classify(cfg: Config, threshold: float | None, min_size: int) -> None:
 
     person_names = sorted(valid_names)  # stable order, (P,)
 
-    # --- Collect unlabeled faces ---
+    # --- Collect unlabeled faces (special-label rejects are already named, so excluded) ---
     unlabeled_indices = [i for i, row in enumerate(rows) if not row.get("name")]
 
     click.echo(
@@ -117,6 +118,7 @@ def classify(cfg: Config, threshold: float | None, min_size: int) -> None:
 
     accepted = 0
     skipped = 0
+    rejected = 0
 
     for rank, pos in enumerate(order, 1):
         face_idx = unlabeled_indices[pos]
@@ -136,7 +138,7 @@ def classify(cfg: Config, threshold: float | None, min_size: int) -> None:
         try:
             response = input(
                 f"→ {matched_name} (dist {dist:.2f})? "
-                "[Enter=accept / n=skip / <name>=rename]: "
+                "[Enter=accept / n=skip / x=non-face / f=foreign / <name>=rename]: "
             ).strip()
         except EOFError:
             plt.close("all")
@@ -151,12 +153,22 @@ def classify(cfg: Config, threshold: float | None, min_size: int) -> None:
             skipped += 1
             continue
 
-        # Accept (empty) or rename (non-empty text that isn't "n")
+        if response.lower() == "x":
+            stick_face(db, row["md5"], row["bbox"], LABEL_NONFACE)
+            rejected += 1
+            continue
+
+        if response.lower() == "f":
+            stick_face(db, row["md5"], row["bbox"], LABEL_FOREIGN)
+            rejected += 1
+            continue
+
+        # Accept (empty) or rename (non-empty text that isn't a shortcut)
         final_name = response if response else matched_name
         stick_face(db, row["md5"], row["bbox"], final_name)
         accepted += 1
 
     click.echo(
-        f"\nDone. {accepted} accepted/renamed, {skipped} skipped.\n"
+        f"\nDone. {accepted} accepted/renamed, {skipped} skipped, {rejected} rejected.\n"
         "Run `faces clusterize --reset` to rebuild clusters with the new labels."
     )

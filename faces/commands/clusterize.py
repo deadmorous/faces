@@ -6,7 +6,7 @@ from sklearn.cluster import AgglomerativeClustering
 from sklearn.metrics import pairwise_distances
 
 from ..config import Config
-from ..db import load_all_embeddings, open_db, reset_clusters, store_clusters
+from ..db import SPECIAL_LABELS, load_all_embeddings, open_db, reset_clusters, store_clusters
 
 
 @click.command()
@@ -49,16 +49,19 @@ def clusterize(cfg: Config, threshold: float | None, reset: bool) -> None:
     click.echo()
 
     names = [row["name"] for row in rows]
-    if any(names):
+    # Special-label faces (non-face, foreign) carry no identity signal —
+    # exclude them from constraint-building so they cluster freely.
+    real_names = [n if (n and n not in SPECIAL_LABELS) else None for n in names]
+    if any(real_names):
         D = pairwise_distances(X, metric="euclidean")
         must_link = cannot_link = 0
         for i in range(len(rows)):
-            if not names[i]:
+            if not real_names[i]:
                 continue
             for j in range(i + 1, len(rows)):
-                if not names[j]:
+                if not real_names[j]:
                     continue
-                if names[i] == names[j]:
+                if real_names[i] == real_names[j]:
                     D[i, j] = D[j, i] = 0.0
                     must_link += 1
                 else:

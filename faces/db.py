@@ -12,6 +12,13 @@ import pyarrow as pa
 
 from .scanner import FaceDetection
 
+# Sentinel labels that mark faces as irrelevant.  They are stored like normal
+# sticky labels so they survive re-scans and re-clusters, but commands treat
+# them as opaque rejects rather than real person identities.
+LABEL_NONFACE = "__nonface__"   # false-positive detection (foot, object, …)
+LABEL_FOREIGN = "__foreign__"   # real face but not a person of interest
+SPECIAL_LABELS: frozenset[str] = frozenset({LABEL_NONFACE, LABEL_FOREIGN})
+
 _PHOTOS_SCHEMA = pa.schema([
     pa.field("path", pa.utf8()),       # relative to the configured photos root
     pa.field("md5", pa.utf8()),
@@ -179,8 +186,9 @@ def store_clusters(db: Database, rows: list[dict], labels: np.ndarray) -> int:
     # Derive cluster name: all named faces in a cluster must agree; unnamed are neutral.
     named_sets: dict[int, set] = defaultdict(set)
     for row, label in zip(rows, labels):
-        if row.get("name"):
-            named_sets[int(label)].add(row["name"])
+        name = row.get("name")
+        if name and name not in SPECIAL_LABELS:
+            named_sets[int(label)].add(name)
     cluster_name: dict[int, str | None] = {
         cid: (names.pop() if len(names) == 1 else None)
         for cid, names in named_sets.items()
