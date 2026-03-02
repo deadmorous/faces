@@ -6,14 +6,14 @@ import click
 from ..config import Config
 from ..db import (Database, compute_md5, load_stat_index, open_db,
                   photo_is_indexed, store_detections, store_photo,
-                  update_photo_stat)
+                  update_photo_path, update_photo_stat)
 
 
 JPEG_PATTERNS = ("*.jpg", "*.jpeg", "*.JPG", "*.JPEG")
 
 
 def scan_photo(db: Database, root: Path, path: Path, force: bool,
-               stat_index: set,
+               stat_index: dict,
                debug_crops_dir: Path | None = None) -> None:
     from ..scanner import detect_faces
 
@@ -22,8 +22,13 @@ def scan_photo(db: Database, root: Path, path: Path, force: bool,
     file_size = stat.st_size
     mtime     = stat.st_mtime
 
-    if not force and (filename, file_size, mtime) in stat_index:
-        return                                   # fast path — in-memory lookup
+    if not force:
+        entry = stat_index.get((filename, file_size, mtime))
+        if entry is not None:
+            rel_path = str(path.relative_to(root))
+            if entry["path"] != rel_path:
+                update_photo_path(db, entry["md5"], rel_path)
+            return                               # fast path — in-memory lookup
 
     md5 = compute_md5(path)
     if not force and photo_is_indexed(db, md5):

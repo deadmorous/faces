@@ -93,10 +93,11 @@ def photo_is_indexed(db: Database, md5: str) -> bool:
     return len(hits) > 0
 
 
-def load_stat_index(db: Database) -> set[tuple[str, int, float]]:
-    """Return a set of (filename, file_size, mtime) for all fully-statted rows.
+def load_stat_index(db: Database) -> dict[tuple[str, int, float], dict]:
+    """Return a dict keyed by (filename, file_size, mtime) for all fully-statted rows.
 
-    Callers can do O(1) membership tests instead of per-file DB queries.
+    Values are {"md5": str, "path": str}. Callers can do O(1) membership tests
+    and path-staleness checks without any per-file DB queries.
     """
     rows = (
         db.photos.search()
@@ -104,7 +105,10 @@ def load_stat_index(db: Database) -> set[tuple[str, int, float]]:
         .limit(10_000_000)
         .to_list()
     )
-    return {(r["filename"], r["file_size"], r["mtime"]) for r in rows}
+    return {
+        (r["filename"], r["file_size"], r["mtime"]): {"md5": r["md5"], "path": r["path"]}
+        for r in rows
+    }
 
 
 def store_photo(db: Database, relative_path: Path, md5: str, face_count: int,
@@ -127,6 +131,10 @@ def update_photo_stat(db: Database, md5: str,
         where=f"md5 = '{md5}'",
         values={"filename": safe_name, "file_size": file_size, "mtime": mtime},
     )
+
+
+def update_photo_path(db: Database, md5: str, new_path: str) -> None:
+    db.photos.update(where=f"md5 = '{md5}'", values={"path": new_path})
 
 
 def store_detections(db: Database, md5: str,
