@@ -9,7 +9,7 @@ import numpy as np
 
 from ..config import Config
 from ..db import (LABEL_FOREIGN, LABEL_NONFACE, SPECIAL_LABELS,
-                  load_all_embeddings, load_photo_mtimes, open_db,
+                  load_all_embeddings, load_photo_dates, open_db,
                   parse_date, stick_face)
 
 _STOP_WORDS = {"exit", "stop", "quit", "q"}
@@ -51,10 +51,10 @@ def classify(cfg: Config, threshold: float | None, min_size: int,
     db = open_db(cfg.database)
     rows, X = load_all_embeddings(db)
 
-    # Build md5 → mtime map once if a time range was requested.
+    # Build md5 → date map once if a time range was requested.
     photo_mtimes: dict[str, float] | None = None
     if since_ts is not None or until_ts is not None:
-        photo_mtimes = load_photo_mtimes(db)
+        photo_mtimes = load_photo_dates(db)
 
     if not rows:
         click.echo("No faces found. Run `faces scan` first.")

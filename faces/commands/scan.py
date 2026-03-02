@@ -1,3 +1,4 @@
+import datetime
 import json
 from pathlib import Path
 
@@ -6,10 +7,35 @@ import click
 from ..config import Config
 from ..db import (Database, compute_md5, load_stat_index, open_db,
                   parse_date, photo_is_indexed, store_detections, store_photo,
-                  update_photo_path, update_photo_stat)
+                  update_photo_exif, update_photo_path, update_photo_stat)
 
 
 JPEG_PATTERNS = ("*.jpg", "*.jpeg", "*.JPG", "*.JPEG")
+
+_EXIF_IFD          = 34665  # pointer to the EXIF sub-IFD
+_EXIF_DATETIME_ORG = 36867  # DateTimeOriginal (in sub-IFD)
+_EXIF_DATETIME     =   306  # DateTime (in main IFD, fallback)
+
+
+def _read_exif_date(path: Path) -> float | None:
+    """Return the photo capture time as a local Unix timestamp, or None.
+
+    Tries EXIF DateTimeOriginal (sub-IFD) first, then falls back to the
+    main-IFD DateTime tag.  Treats the value as local time (EXIF carries
+    no timezone).  Returns None on any error or if no date tag is found.
+    """
+    from PIL import Image
+    try:
+        with Image.open(path) as img:
+            exif = img.getexif()
+            dt_str = (exif.get_ifd(_EXIF_IFD).get(_EXIF_DATETIME_ORG)
+                      or exif.get(_EXIF_DATETIME))
+        if not dt_str:
+            return None
+        dt = datetime.datetime.strptime(dt_str.strip(), "%Y:%m:%d %H:%M:%S")
+        return dt.timestamp()
+    except Exception:
+        return None
 
 
 def scan_photo(db: Database, root: Path, path: Path, force: bool,
@@ -35,11 +61,16 @@ def scan_photo(db: Database, root: Path, path: Path, force: bool,
             rel_path = str(path.relative_to(root))
             if entry["path"] != rel_path:
                 update_photo_path(db, entry["md5"], rel_path)
+            if entry.get("exif_date") is None:
+                exif_date = _read_exif_date(path)
+                if exif_date is not None:
+                    update_photo_exif(db, entry["md5"], exif_date)
             return                               # fast path — in-memory lookup
 
     md5 = compute_md5(path)
     if not force and photo_is_indexed(db, md5):
-        update_photo_stat(db, md5, filename, file_size, mtime)  # backfill
+        update_photo_stat(db, md5, filename, file_size, mtime,
+                          exif_date=_read_exif_date(path))  # backfill
         return
 
     detections = detect_faces(path)
@@ -49,7 +80,7 @@ def scan_photo(db: Database, root: Path, path: Path, force: bool,
         print(f"  [{preview}, ...]")
 
     store_photo(db, path.relative_to(root), md5, len(detections),
-                filename, file_size, mtime)
+                filename, file_size, mtime, exif_date=_read_exif_date(path))
     store_detections(db, md5, detections)
 
     if debug_crops_dir is not None:

@@ -3,7 +3,7 @@ import sys
 import click
 
 from ..config import Config
-from ..db import open_db, parse_date
+from ..db import load_photo_dates, open_db, parse_date
 
 
 @click.command()
@@ -71,18 +71,28 @@ def show(cfg: Config, person: str | None, all_people: bool,
     if not cluster_rows:
         raise click.ClickException(f"No cluster found for {person!r}.")
 
-    # Collect unique md5s, then look up photo paths.
+    # Collect unique md5s, then apply time filter and look up photo paths.
     md5s = {r["md5"] for r in cluster_rows}
+
+    if since_ts is not None or until_ts is not None:
+        photo_dates = load_photo_dates(db)
+        filtered: set[str] = set()
+        for md5 in md5s:
+            date = photo_dates.get(md5)
+            if date is None:
+                continue
+            if since_ts is not None and date < since_ts:
+                continue
+            if until_ts is not None and date >= until_ts:
+                continue
+            filtered.add(md5)
+        md5s = filtered
+
     paths: list[str] = []
     for md5 in md5s:
-        where_parts = [f"md5 = '{md5}'"]
-        if since_ts is not None:
-            where_parts.append(f"mtime >= {since_ts}")
-        if until_ts is not None:
-            where_parts.append(f"mtime < {until_ts}")
         photo_rows = (
             db.photos.search()
-            .where(" AND ".join(where_parts), prefilter=True)
+            .where(f"md5 = '{md5}'", prefilter=True)
             .limit(1)
             .to_list()
         )

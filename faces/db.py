@@ -27,6 +27,7 @@ _PHOTOS_SCHEMA = pa.schema([
     pa.field("filename",  pa.utf8()),
     pa.field("file_size", pa.int64()),
     pa.field("mtime",     pa.float64()),   # st_mtime: seconds since epoch
+    pa.field("exif_date", pa.float64()),  # EXIF DateTimeOriginal as local Unix ts (nullable)
 ])
 
 _FACES_SCHEMA = pa.schema([
@@ -74,6 +75,8 @@ def open_db(db_path: Path) -> Database:
             "file_size": "CAST(NULL AS bigint)",
             "mtime":     "CAST(NULL AS double)",
         })
+    if "exif_date" not in photos_table.schema.names:
+        photos_table.add_columns({"exif_date": "CAST(NULL AS double)"})
     return Database(
         photos=photos_table,
         faces=faces_table,
@@ -113,13 +116,18 @@ def load_stat_index(db: Database) -> dict[tuple[str, int, float], dict]:
         .to_list()
     )
     return {
-        (r["filename"], r["file_size"], r["mtime"]): {"md5": r["md5"], "path": r["path"]}
+        (r["filename"], r["file_size"], r["mtime"]): {
+            "md5": r["md5"],
+            "path": r["path"],
+            "exif_date": r.get("exif_date"),
+        }
         for r in rows
     }
 
 
 def store_photo(db: Database, relative_path: Path, md5: str, face_count: int,
-                filename: str, file_size: int, mtime: float) -> None:
+                filename: str, file_size: int, mtime: float,
+                exif_date: float | None = None) -> None:
     db.photos.add([{
         "path": str(relative_path),
         "md5": md5,
@@ -128,20 +136,26 @@ def store_photo(db: Database, relative_path: Path, md5: str, face_count: int,
         "filename": filename,
         "file_size": file_size,
         "mtime": mtime,
+        "exif_date": exif_date,
     }])
 
 
 def update_photo_stat(db: Database, md5: str,
-                      filename: str, file_size: int, mtime: float) -> None:
+                      filename: str, file_size: int, mtime: float,
+                      exif_date: float | None = None) -> None:
     safe_name = filename.replace("'", "''")
-    db.photos.update(
-        where=f"md5 = '{md5}'",
-        values={"filename": safe_name, "file_size": file_size, "mtime": mtime},
-    )
+    values: dict = {"filename": safe_name, "file_size": file_size, "mtime": mtime}
+    if exif_date is not None:
+        values["exif_date"] = exif_date
+    db.photos.update(where=f"md5 = '{md5}'", values=values)
 
 
 def update_photo_path(db: Database, md5: str, new_path: str) -> None:
     db.photos.update(where=f"md5 = '{md5}'", values={"path": new_path})
+
+
+def update_photo_exif(db: Database, md5: str, exif_date: float) -> None:
+    db.photos.update(where=f"md5 = '{md5}'", values={"exif_date": exif_date})
 
 
 def store_detections(db: Database, md5: str,
@@ -206,15 +220,21 @@ def parse_date(s: str, end_of_period: bool = False) -> float:
     return dt.timestamp()
 
 
-def load_photo_mtimes(db: Database) -> dict[str, float]:
-    """Return a dict mapping md5 → mtime for all photos that have mtime set."""
-    rows = (
-        db.photos.search()
-        .where("mtime IS NOT NULL", prefilter=True)
-        .limit(10_000_000)
-        .to_list()
-    )
-    return {r["md5"]: r["mtime"] for r in rows}
+def load_photo_dates(db: Database) -> dict[str, float]:
+    """Return {md5: date} using exif_date when available, falling back to mtime.
+
+    exif_date (EXIF DateTimeOriginal) reflects when the photo was taken;
+    mtime is the filesystem modification time and is used only as a fallback
+    for photos that have no EXIF data or were scanned before exif_date was
+    added.
+    """
+    rows = db.photos.search().limit(10_000_000).to_list()
+    result: dict[str, float] = {}
+    for r in rows:
+        date = r.get("exif_date") or r.get("mtime")
+        if date:
+            result[r["md5"]] = date
+    return result
 
 
 def load_all_embeddings(db: Database) -> tuple[list[dict], np.ndarray]:
