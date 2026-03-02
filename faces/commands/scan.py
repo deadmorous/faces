@@ -5,7 +5,7 @@ import click
 
 from ..config import Config
 from ..db import (Database, compute_md5, load_stat_index, open_db,
-                  photo_is_indexed, store_detections, store_photo,
+                  parse_date, photo_is_indexed, store_detections, store_photo,
                   update_photo_path, update_photo_stat)
 
 
@@ -14,13 +14,20 @@ JPEG_PATTERNS = ("*.jpg", "*.jpeg", "*.JPG", "*.JPEG")
 
 def scan_photo(db: Database, root: Path, path: Path, force: bool,
                stat_index: dict,
-               debug_crops_dir: Path | None = None) -> None:
+               debug_crops_dir: Path | None = None,
+               since_ts: float | None = None,
+               until_ts: float | None = None) -> None:
     from ..scanner import detect_faces
 
     stat = path.stat()
     filename  = path.name
     file_size = stat.st_size
     mtime     = stat.st_mtime
+
+    if since_ts is not None and mtime < since_ts:
+        return
+    if until_ts is not None and mtime >= until_ts:
+        return
 
     if not force:
         entry = stat_index.get((filename, file_size, mtime))
@@ -76,15 +83,24 @@ def _image_size(path: Path) -> tuple[int, int]:
 @click.option("--debug-crops", "debug_crops_dir", metavar="DIR",
               type=click.Path(file_okay=False, writable=True, resolve_path=True),
               help="Write a JSON file with face bounding boxes for each photo to DIR.")
+@click.option("--since", metavar="DATE",
+              help="Only process files with mtime >= DATE (YYYY, YYYY-MM, or YYYY-MM-DD).")
+@click.option("--until", metavar="DATE",
+              help="Only process files with mtime < DATE (exclusive; same format as --since).")
 @click.pass_obj
 def scan(cfg: Config, photos_dir: str | None, recursive: bool, force: bool,
-         debug_crops_dir: str | None) -> None:
+         debug_crops_dir: str | None, since: str | None, until: str | None) -> None:
     """Detect and index faces found in PHOTOS_DIR.
 
     When PHOTOS_DIR is omitted the value from the configuration file is used.
     New faces are appended to the index; existing entries are skipped unless
     --force is given.
     """
+    try:
+        since_ts = parse_date(since) if since else None
+        until_ts = parse_date(until, end_of_period=True) if until else None
+    except ValueError as e:
+        raise click.BadParameter(str(e))
     target = Path(photos_dir) if photos_dir else cfg.photos_dir
     if target is None:
         raise click.UsageError(
@@ -106,4 +122,4 @@ def scan(cfg: Config, photos_dir: str | None, recursive: bool, force: bool,
     glob = target.rglob if recursive else target.glob
     for pattern in JPEG_PATTERNS:
         for photo in sorted(glob(pattern)):
-            scan_photo(db, root, photo, force, stat_index, dbg)
+            scan_photo(db, root, photo, force, stat_index, dbg, since_ts, until_ts)

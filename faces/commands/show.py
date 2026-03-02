@@ -3,7 +3,7 @@ import sys
 import click
 
 from ..config import Config
-from ..db import open_db
+from ..db import open_db, parse_date
 
 
 @click.command()
@@ -14,14 +14,25 @@ from ..db import open_db
               help="Write paths to FILE instead of stdout.")
 @click.option("--absolute", "absolute", is_flag=True,
               help="Print absolute paths. Requires photos_dir in config.")
+@click.option("--since", metavar="DATE",
+              help="Only include photos with mtime >= DATE (YYYY, YYYY-MM, or YYYY-MM-DD).")
+@click.option("--until", metavar="DATE",
+              help="Only include photos with mtime < DATE (exclusive; same format as --since).")
 @click.pass_obj
 def show(cfg: Config, person: str | None, all_people: bool,
-         output_file: str | None, absolute: bool) -> None:
+         output_file: str | None, absolute: bool,
+         since: str | None, until: str | None) -> None:
     """Show photos that contain PERSON.
 
     PERSON may be a name assigned with 'rename' or a raw cluster ID.
     When --all-people is given, lists every named person instead.
     """
+    try:
+        since_ts = parse_date(since) if since else None
+        until_ts = parse_date(until, end_of_period=True) if until else None
+    except ValueError as e:
+        raise click.BadParameter(str(e))
+
     db = open_db(cfg.database)
 
     if all_people:
@@ -64,9 +75,14 @@ def show(cfg: Config, person: str | None, all_people: bool,
     md5s = {r["md5"] for r in cluster_rows}
     paths: list[str] = []
     for md5 in md5s:
+        where_parts = [f"md5 = '{md5}'"]
+        if since_ts is not None:
+            where_parts.append(f"mtime >= {since_ts}")
+        if until_ts is not None:
+            where_parts.append(f"mtime < {until_ts}")
         photo_rows = (
             db.photos.search()
-            .where(f"md5 = '{md5}'", prefilter=True)
+            .where(" AND ".join(where_parts), prefilter=True)
             .limit(1)
             .to_list()
         )

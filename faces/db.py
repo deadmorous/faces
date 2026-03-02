@@ -170,6 +170,53 @@ def load_unstatted_photos(db: Database) -> list[dict]:
     )
 
 
+def parse_date(s: str, end_of_period: bool = False) -> float:
+    """Parse YYYY, YYYY-MM, or YYYY-MM-DD to a UTC Unix timestamp.
+
+    With *end_of_period=False* (default) returns the first moment of the
+    given period.  With *end_of_period=True* returns the first moment of the
+    *next* period — a convenient exclusive upper bound for range queries.
+
+    Raises ValueError on unrecognised input.
+    """
+    parts = s.split("-")
+    try:
+        if len(parts) == 1:
+            year = int(parts[0])
+            if end_of_period:
+                dt = datetime.datetime(year + 1, 1, 1, tzinfo=datetime.timezone.utc)
+            else:
+                dt = datetime.datetime(year, 1, 1, tzinfo=datetime.timezone.utc)
+        elif len(parts) == 2:
+            year, month = int(parts[0]), int(parts[1])
+            if end_of_period:
+                month += 1
+                if month > 12:
+                    year, month = year + 1, 1
+            dt = datetime.datetime(year, month, 1, tzinfo=datetime.timezone.utc)
+        elif len(parts) == 3:
+            year, month, day = int(parts[0]), int(parts[1]), int(parts[2])
+            dt = datetime.datetime(year, month, day, tzinfo=datetime.timezone.utc)
+            if end_of_period:
+                dt += datetime.timedelta(days=1)
+        else:
+            raise ValueError
+    except (ValueError, OverflowError):
+        raise ValueError(f"expected YYYY, YYYY-MM, or YYYY-MM-DD, got {s!r}")
+    return dt.timestamp()
+
+
+def load_photo_mtimes(db: Database) -> dict[str, float]:
+    """Return a dict mapping md5 → mtime for all photos that have mtime set."""
+    rows = (
+        db.photos.search()
+        .where("mtime IS NOT NULL", prefilter=True)
+        .limit(10_000_000)
+        .to_list()
+    )
+    return {r["md5"]: r["mtime"] for r in rows}
+
+
 def load_all_embeddings(db: Database) -> tuple[list[dict], np.ndarray]:
     """Return (rows, X) where rows has md5, bbox, name; X is shape (N, 512) float32."""
     all_rows = db.faces.search().limit(10_000_000).to_list()

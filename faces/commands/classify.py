@@ -9,7 +9,8 @@ import numpy as np
 
 from ..config import Config
 from ..db import (LABEL_FOREIGN, LABEL_NONFACE, SPECIAL_LABELS,
-                  load_all_embeddings, open_db, stick_face)
+                  load_all_embeddings, load_photo_mtimes, open_db,
+                  parse_date, stick_face)
 
 _STOP_WORDS = {"exit", "stop", "quit", "q"}
 
@@ -19,8 +20,13 @@ _STOP_WORDS = {"exit", "stop", "quit", "q"}
               help="Similarity threshold (0.0–1.0). Overrides the config value.")
 @click.option("--min-size", type=int, default=3, show_default=True,
               help="Minimum labeled faces a named centroid must have to be used.")
+@click.option("--since", metavar="DATE",
+              help="Only classify faces from photos with mtime >= DATE (YYYY, YYYY-MM, or YYYY-MM-DD).")
+@click.option("--until", metavar="DATE",
+              help="Only classify faces from photos with mtime < DATE (exclusive; same format as --since).")
 @click.pass_obj
-def classify(cfg: Config, threshold: float | None, min_size: int) -> None:
+def classify(cfg: Config, threshold: float | None, min_size: int,
+             since: str | None, until: str | None) -> None:
     """Match unlabeled faces to known people via single-linkage (min-dist) classification.
 
     Named clusters whose sticky faces number >= MIN_SIZE are used. Each unlabeled
@@ -33,11 +39,22 @@ def classify(cfg: Config, threshold: float | None, min_size: int) -> None:
     """
     from ..viz import show_face
 
+    try:
+        since_ts = parse_date(since) if since else None
+        until_ts = parse_date(until, end_of_period=True) if until else None
+    except ValueError as e:
+        raise click.BadParameter(str(e))
+
     effective_threshold = threshold if threshold is not None else cfg.cluster_threshold
     eps = math.sqrt(2.0 * (1.0 - effective_threshold))
 
     db = open_db(cfg.database)
     rows, X = load_all_embeddings(db)
+
+    # Build md5 → mtime map once if a time range was requested.
+    photo_mtimes: dict[str, float] | None = None
+    if since_ts is not None or until_ts is not None:
+        photo_mtimes = load_photo_mtimes(db)
 
     if not rows:
         click.echo("No faces found. Run `faces scan` first.")
@@ -64,7 +81,22 @@ def classify(cfg: Config, threshold: float | None, min_size: int) -> None:
     person_names = sorted(valid_names)  # stable order, (P,)
 
     # --- Collect unlabeled faces (special-label rejects are already named, so excluded) ---
-    unlabeled_indices = [i for i, row in enumerate(rows) if not row.get("name")]
+    def _in_time_range(row: dict) -> bool:
+        if photo_mtimes is None:
+            return True
+        mt = photo_mtimes.get(row["md5"])
+        if mt is None:
+            return False  # no mtime recorded → exclude when filtering
+        if since_ts is not None and mt < since_ts:
+            return False
+        if until_ts is not None and mt >= until_ts:
+            return False
+        return True
+
+    unlabeled_indices = [
+        i for i, row in enumerate(rows)
+        if not row.get("name") and _in_time_range(row)
+    ]
 
     click.echo(
         f"Classifying {len(unlabeled_indices)} unlabeled faces against "
