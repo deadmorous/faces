@@ -2,8 +2,12 @@
 
 Run with:
     uvicorn faces.web.main:app --reload
+
+Set the FACES_CONFIG environment variable to point to a specific config file:
+    FACES_CONFIG=~/work/faces.yaml uvicorn faces.web.main:app --reload
 """
 
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -15,7 +19,7 @@ from .routers import classify, clusterize, clusters, faces, images, people, phot
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    cfg = load()
+    cfg = load(os.environ.get("FACES_CONFIG"))
     db = open_db(cfg.database)
     app.state.cfg = cfg
     app.state.db = db
