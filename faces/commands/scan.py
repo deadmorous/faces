@@ -73,7 +73,12 @@ def scan_photo(db: Database, root: Path, path: Path, force: bool,
                           exif_date=_read_exif_date(path))  # backfill
         return
 
-    detections = detect_faces(path)
+    try:
+        detections = detect_faces(path)
+    except Exception as e:
+        print(f"WARNING: skipping {path}: {e}", flush=True)
+        return
+
     print(path)
     for d in detections:
         preview = ", ".join(f"{v:.4f}" for v in d.embedding.tolist()[:3])

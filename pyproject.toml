@@ -17,3 +17,6 @@ faces = "faces.cli:cli"
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-cov"]
+
+[tool.setuptools.packages.find]
+include = ["faces*"]
