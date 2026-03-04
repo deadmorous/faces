@@ -5,6 +5,7 @@ from .commands.classify import classify
 from .commands.clusterize import clusterize
 from .commands.label import label
 from .commands.list_clusters import list_clusters
+from .commands.optimize import optimize
 from .commands.rename import rename
 from .commands.scan import scan
 from .commands.show import show
@@ -59,3 +60,4 @@ cli.add_command(label)
 cli.add_command(rename)
 cli.add_command(stick)
 cli.add_command(show)
+cli.add_command(optimize)

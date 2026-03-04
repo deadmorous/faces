@@ -1,5 +1,6 @@
 import datetime
 import json
+from datetime import timedelta
 from pathlib import Path
 
 import click
@@ -42,7 +43,8 @@ def scan_photo(db: Database, root: Path, path: Path, force: bool,
                stat_index: dict,
                debug_crops_dir: Path | None = None,
                since_ts: float | None = None,
-               until_ts: float | None = None) -> None:
+               until_ts: float | None = None) -> int:
+    """Scan one photo. Returns 1 if a new row was stored, 0 otherwise."""
     from ..scanner import detect_faces
 
     stat = path.stat()
@@ -51,9 +53,9 @@ def scan_photo(db: Database, root: Path, path: Path, force: bool,
     mtime     = stat.st_mtime
 
     if since_ts is not None and mtime < since_ts:
-        return
+        return 0
     if until_ts is not None and mtime >= until_ts:
-        return
+        return 0
 
     if not force:
         entry = stat_index.get((filename, file_size, mtime))
@@ -65,19 +67,19 @@ def scan_photo(db: Database, root: Path, path: Path, force: bool,
                 exif_date = _read_exif_date(path)
                 if exif_date is not None:
                     update_photo_exif(db, entry["md5"], exif_date)
-            return                               # fast path — in-memory lookup
+            return 0                             # fast path — in-memory lookup
 
     md5 = compute_md5(path)
     if not force and photo_is_indexed(db, md5):
         update_photo_stat(db, md5, filename, file_size, mtime,
                           exif_date=_read_exif_date(path))  # backfill
-        return
+        return 0
 
     try:
         detections = detect_faces(path)
     except Exception as e:
         print(f"WARNING: skipping {path}: {e}", flush=True)
-        return
+        return 0
 
     print(path)
     for d in detections:
@@ -101,6 +103,8 @@ def scan_photo(db: Database, root: Path, path: Path, force: bool,
         }
         out = debug_crops_dir / (path.stem + ".json")
         out.write_text(json.dumps(data, indent=2))
+
+    return 1
 
 
 def _image_size(path: Path) -> tuple[int, int]:
@@ -155,7 +159,19 @@ def scan(cfg: Config, photos_dir: str | None, recursive: bool, force: bool,
     if dbg is not None:
         dbg.mkdir(parents=True, exist_ok=True)
 
+    COMPACT_EVERY = 1000
+    new_count = 0
     glob = target.rglob if recursive else target.glob
     for pattern in JPEG_PATTERNS:
         for photo in sorted(glob(pattern)):
-            scan_photo(db, root, photo, force, stat_index, dbg, since_ts, until_ts)
+            new_count += scan_photo(db, root, photo, force, stat_index, dbg, since_ts, until_ts)
+            if new_count % COMPACT_EVERY == 0 and new_count > 0:
+                click.echo(f"Compacting database at {new_count} new photo(s)…")
+                for table in (db.photos, db.faces):
+                    table.optimize(cleanup_older_than=timedelta(0))
+
+    remainder = new_count % COMPACT_EVERY
+    if remainder:
+        click.echo(f"Compacting database after {new_count} new photo(s)…")
+        for table in (db.photos, db.faces):
+            table.optimize(cleanup_older_than=timedelta(0))
