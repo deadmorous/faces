@@ -9,8 +9,11 @@ Set the FACES_CONFIG environment variable to point to a specific config file:
 
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from ..config import load
 from ..db import open_db
@@ -32,6 +35,15 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+_STATIC_DIR = Path(__file__).parent / "static"
+app.mount("/ui", StaticFiles(directory=_STATIC_DIR, html=True), name="static")
+
+
+@app.get("/", include_in_schema=False)
+def root_redirect():
+    return RedirectResponse(url="/ui/")
+
 
 app.include_router(images.router)
 app.include_router(clusters.router)

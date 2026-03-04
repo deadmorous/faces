@@ -6,7 +6,7 @@ from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from PIL import Image
+from PIL import Image, ImageOps
 
 from ..deps import get_cfg, get_db
 from ...config import Config
@@ -14,6 +14,32 @@ from ...db import Database
 from ...viz import PADDING_FRAC
 
 router = APIRouter(prefix="/img", tags=["images"])
+
+
+def _transform_bbox_for_display(
+    bbox: list[int], orientation: int, raw_w: int, raw_h: int
+) -> list[int]:
+    """Map a bbox from raw (unrotated) pixel space into display (post-EXIF) space.
+
+    ``orientation`` is the EXIF Orientation tag value (1–8).
+    For orientations 5-8 the display image is transposed (width↔height swapped).
+    """
+    x1, y1, x2, y2 = bbox
+    if orientation == 2:
+        return [raw_w - x2, y1, raw_w - x1, y2]
+    if orientation == 3:
+        return [raw_w - x2, raw_h - y2, raw_w - x1, raw_h - y1]
+    if orientation == 4:
+        return [x1, raw_h - y2, x2, raw_h - y1]
+    if orientation == 5:
+        return [y1, x1, y2, x2]
+    if orientation == 6:  # 90° CW — most common for phone portrait
+        return [raw_h - y2, x1, raw_h - y1, x2]
+    if orientation == 7:
+        return [raw_h - y2, raw_w - x2, raw_h - y1, raw_w - x1]
+    if orientation == 8:  # 90° CCW
+        return [y1, raw_w - x2, y2, raw_w - x1]
+    return list(bbox)  # orientation == 1: no transform
 
 
 def _resolve_photo_path(db: Database, cfg: Config, md5: str) -> Path:
@@ -74,18 +100,24 @@ def get_face(
     photo_path = _resolve_photo_path(db, cfg, md5)
 
     try:
-        img = Image.open(photo_path).convert("RGB")
+        raw = Image.open(photo_path)
+        orientation = raw.getexif().get(0x0112, 1)
+        raw_w, raw_h = raw.size
+        img = ImageOps.exif_transpose(raw.convert("RGB"))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Could not open image: {e}")
 
-    w, h = x2 - x1, y2 - y1
+    dx1, dy1, dx2, dy2 = _transform_bbox_for_display(
+        [x1, y1, x2, y2], orientation, raw_w, raw_h
+    )
+    w, h = dx2 - dx1, dy2 - dy1
     pad_x = int(w * padding)
     pad_y = int(h * padding)
-    cx1 = max(0, x1 - pad_x)
-    cy1 = max(0, y1 - pad_y)
-    cx2 = min(img.width, x2 + pad_x)
-    cy2 = min(img.height, y2 + pad_y)
-    cropped = img.crop((cx1, cy1, cx2, cy2)).resize((size, size), Image.LANCZOS)
+    cx1 = max(0, dx1 - pad_x)
+    cy1 = max(0, dy1 - pad_y)
+    cx2 = min(img.width, dx2 + pad_x)
+    cy2 = min(img.height, dy2 + pad_y)
+    cropped = ImageOps.fit(img.crop((cx1, cy1, cx2, cy2)), (size, size), Image.LANCZOS)
 
     buf = io.BytesIO()
     cropped.save(buf, format="JPEG", quality=85)

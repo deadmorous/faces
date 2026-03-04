@@ -1,9 +1,11 @@
 """/api/photos — paginated photo list and per-photo detail."""
 
 from collections import defaultdict
+from pathlib import Path
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from PIL import Image
 
 from ..deps import get_cfg, get_db
 from ..models import PhotoDetail, PhotoFaceDetail, PhotoList, PhotoSummary
@@ -11,6 +13,13 @@ from ...config import Config
 from ...db import Database, load_photo_dates, parse_date
 
 router = APIRouter(prefix="/api/photos", tags=["photos"])
+
+
+def _read_exif_orientation(path: Path) -> int:
+    try:
+        return Image.open(path).getexif().get(0x0112, 1)
+    except Exception:
+        return 1
 
 
 @router.get("", response_model=PhotoList, summary="Paginated photo list")
@@ -115,10 +124,15 @@ def get_photo(
             cluster_url=cluster_url,
         ))
 
+    rel = photo_row["path"]
+    photo_path = (cfg.photos_dir / rel) if cfg.photos_dir else Path(rel)
+    exif_orientation = _read_exif_orientation(photo_path)
+
     return PhotoDetail(
         md5=md5,
         path=photo_row["path"],
         exif_date=photo_row.get("exif_date"),
+        exif_orientation=exif_orientation,
         photo_url=f"/img/photo/{md5}",
         faces=faces,
     )

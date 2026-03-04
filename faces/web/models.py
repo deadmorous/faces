@@ -99,6 +99,7 @@ class PhotoDetail(BaseModel):
     md5: str
     path: str
     exif_date: Optional[float]
+    exif_orientation: int = 1
     photo_url: str
     faces: list[PhotoFaceDetail]
 
