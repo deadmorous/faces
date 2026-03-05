@@ -104,6 +104,22 @@ class PhotoDetail(BaseModel):
     faces: list[PhotoFaceDetail]
 
 
+# --- Similar faces ---
+
+class SimilarFace(BaseModel):
+    md5: str
+    bbox: list[int]
+    dist: float
+    name: Optional[str]
+    img_url: str
+    photo_path: str
+
+
+class SimilarFacesResponse(BaseModel):
+    seed: SimilarFace
+    faces: list[SimilarFace]
+
+
 # --- Face label ---
 
 class FaceLabelRequest(BaseModel):

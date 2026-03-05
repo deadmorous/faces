@@ -95,6 +95,9 @@ function route() {
       if (parts[1]) renderPersonDetail(decodeURIComponent(parts[1]));
       else renderPeople();
       break;
+    case "similar":
+      renderSimilar(parts[1], parts[2]);
+      break;
     default:
       renderClassify(1);
   }
@@ -175,6 +178,7 @@ async function renderClassify(page = 1) {
                    class="deselected" title="${escHtml(f.photo_path)} (dist ${f.dist.toFixed(3)})"
                    loading="lazy">
               <a href="#/photos/${f.md5}" target="_blank" class="face-link-btn" title="Open photo">↗</a>
+              <a href="#/similar/${f.md5}/${bboxToPathParam(f.bbox)}" class="similar-link-btn" title="Find similar faces">≈</a>
             </div>
           `).join("")}
         </div>
@@ -391,9 +395,12 @@ async function renderClusterDetail(id) {
     </form>
     <div class="face-grid">
       ${data.faces.map(f => `
-        <a href="#/photos/${f.md5}" title="${escHtml(f.photo_path)} (score ${f.score.toFixed(2)})">
-          <img src="${f.img_url}" loading="lazy" alt="">
-        </a>
+        <div class="face-cell">
+          <a href="#/photos/${f.md5}" class="face-nav-link" title="${escHtml(f.photo_path)} (score ${f.score.toFixed(2)})">
+            <img src="${f.img_url}" loading="lazy" alt="">
+          </a>
+          <a href="#/similar/${f.md5}/${bboxToPathParam(f.bbox)}" class="similar-link-btn" title="Find similar faces">≈</a>
+        </div>
       `).join("")}
     </div>
     ${clusterizePanelHtml()}
@@ -528,7 +535,13 @@ async function renderPhotoDetail(md5) {
     html += `<h3 style="margin-top:1.5rem;">Faces</h3><div class="face-grid">`;
     data.faces.forEach(f => {
       const link = f.cluster_id != null ? `#/clusters/${f.cluster_id}` : "#/clusters";
-      html += `<a href="${link}"><img src="${f.img_url}" loading="lazy" title="${f.sticky_name || ""}"></a>`;
+      html += `
+        <div class="face-cell">
+          <a href="${link}" class="face-nav-link" title="${escHtml(f.sticky_name || "")}">
+            <img src="${f.img_url}" loading="lazy">
+          </a>
+          <a href="#/similar/${f.md5}/${bboxToPathParam(f.bbox)}" class="similar-link-btn" title="Find similar faces">≈</a>
+        </div>`;
     });
     html += `</div>`;
   }
@@ -648,6 +661,114 @@ async function renderPersonDetail(name) {
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// View: Similar faces
+// ---------------------------------------------------------------------------
+async function renderSimilar(md5, bboxParam, unlabeledOnly = false) {
+  showSpinner();
+  const bboxQuery = bboxParam.replace(/-/g, ",");
+  let data, people;
+  try {
+    [data, people] = await Promise.all([
+      apiFetch(`/api/faces/similar?md5=${md5}&bbox=${bboxQuery}&limit=100&unlabeled_only=${unlabeledOnly}`),
+      apiFetch("/api/people"),
+    ]);
+  } catch (e) {
+    showError(e.message);
+    return;
+  }
+
+  const knownNames = people
+    .map(p => p.name)
+    .filter(n => !SPECIAL_LABELS.includes(n))
+    .sort((a, b) => a.localeCompare(b));
+
+  const selected = new Set();
+  const app = document.getElementById("app");
+
+  const seedName = data.seed.name
+    ? `<span class="dist-tag">Labeled: ${escHtml(data.seed.name)}</span>`
+    : `<span class="dist-tag">Unlabeled</span>`;
+
+  let html = `
+    <p class="breadcrumb"><a href="#" onclick="history.back();return false;">← Back</a></p>
+    <h2>Similar faces</h2>
+    <div class="similar-seed">
+      <img src="${data.seed.img_url}" class="seed-thumb" alt="">
+      <div>
+        <div>${escHtml(data.seed.photo_path)}</div>
+        ${seedName}
+        <label style="display:flex;align-items:center;gap:0.5rem;margin-top:0.5rem;cursor:pointer;">
+          <input type="checkbox" id="unlabeled-only"${unlabeledOnly ? " checked" : ""}> Unlabeled only
+        </label>
+      </div>
+    </div>
+    <p class="dist-tag">${data.faces.length} result${data.faces.length !== 1 ? "s" : ""}</p>
+    <div class="face-grid">
+      ${data.faces.map((f, fi) => `
+        <div class="face-cell">
+          <img src="${f.img_url}" data-fi="${fi}" class="deselected" loading="lazy"
+               title="${escHtml(f.photo_path)}${f.name ? " · " + escHtml(f.name) : ""} (dist ${f.dist.toFixed(3)})">
+          <a href="#/photos/${f.md5}" target="_blank" class="face-link-btn" title="Open photo">↗</a>
+        </div>
+      `).join("")}
+    </div>
+    <div class="similar-label-row">
+      <input type="text" id="similar-label" list="similar-people-datalist"
+             placeholder="Label — empty to clear">
+      <datalist id="similar-people-datalist">
+        ${knownNames.map(n => `<option value="${escHtml(n)}">`).join("")}
+      </datalist>
+      <button id="similar-submit">Apply to selected</button>
+    </div>`;
+
+  app.innerHTML = html;
+
+  document.getElementById("unlabeled-only").addEventListener("change", e => {
+    renderSimilar(md5, bboxParam, e.target.checked);
+  });
+
+  app.querySelectorAll(".face-grid img").forEach(img => {
+    img.addEventListener("click", () => {
+      const fi = parseInt(img.dataset.fi, 10);
+      const f = data.faces[fi];
+      const key = `${f.md5}:${bboxToQuery(f.bbox)}`;
+      if (selected.has(key)) {
+        selected.delete(key);
+        img.className = "deselected";
+      } else {
+        selected.add(key);
+        img.className = "selected";
+      }
+    });
+  });
+
+  document.getElementById("similar-submit").addEventListener("click", async () => {
+    const label = document.getElementById("similar-label").value.trim() || null;
+    const items = data.faces
+      .filter(f => selected.has(`${f.md5}:${bboxToQuery(f.bbox)}`))
+      .map(f => ({ md5: f.md5, bbox: f.bbox, name: label }));
+
+    if (items.length === 0) {
+      alert("Select at least one face first.");
+      return;
+    }
+
+    const btn = document.getElementById("similar-submit");
+    btn.disabled = true;
+    btn.textContent = "Applying…";
+    try {
+      const resp = await apiPost("/api/classify/labels", items);
+      btn.textContent = `Done — ${resp.labeled} labeled`;
+      setTimeout(() => renderSimilar(md5, bboxParam, unlabeledOnly), 1500);
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = "Apply to selected";
+      showError(e.message);
+    }
+  });
+}
+
 // ---------------------------------------------------------------------------
 // EXIF bbox transform
 // ---------------------------------------------------------------------------

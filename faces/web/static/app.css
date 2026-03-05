@@ -47,10 +47,9 @@
   position: relative;
 }
 
-.face-link-btn {
+.face-link-btn,
+.similar-link-btn {
   position: absolute;
-  top: 3px;
-  right: 3px;
   background: rgba(0, 0, 0, 0.55);
   color: #fff;
   font-size: 10px;
@@ -63,8 +62,25 @@
   z-index: 1;
 }
 
-.face-cell:hover .face-link-btn {
+.face-link-btn {
+  top: 3px;
+  right: 3px;
+}
+
+.similar-link-btn {
+  bottom: 3px;
+  right: 3px;
+}
+
+.face-cell:hover .face-link-btn,
+.face-cell:hover .similar-link-btn {
   opacity: 1;
+}
+
+/* Wrapping <a> inside a face-cell (cluster/photo detail) */
+.face-nav-link {
+  display: block;
+  line-height: 0;
 }
 
 .face-grid img {
@@ -316,4 +332,34 @@
 .people-list .person-meta {
   font-size: 0.8rem;
   color: var(--pico-muted-color);
+}
+
+/* Similar faces view */
+.similar-seed {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.seed-thumb {
+  width: 112px;
+  height: 112px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.similar-label-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+.similar-label-row input[type="text"] {
+  flex: 1;
+  min-width: 200px;
+  margin: 0;
 }
