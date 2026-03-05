@@ -20,6 +20,13 @@ class ClusterSummary(BaseModel):
     sample_faces: list[FaceSample]
 
 
+class ClusterList(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    clusters: list[ClusterSummary]
+
+
 class FaceDetail(BaseModel):
     md5: str
     bbox: list[int]
@@ -34,7 +41,9 @@ class FaceDetail(BaseModel):
 class ClusterDetail(BaseModel):
     id: int
     name: Optional[str]
-    size: int
+    size: int        # total faces in cluster
+    page: int
+    page_size: int
     faces: list[FaceDetail]
 
 
@@ -87,6 +96,7 @@ class PhotoList(BaseModel):
 
 
 class PhotoFaceDetail(BaseModel):
+    md5: str
     bbox: list[int]
     score: float
     sticky_name: Optional[str]

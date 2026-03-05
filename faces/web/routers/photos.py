@@ -116,6 +116,7 @@ def get_photo(
         cluster_url = f"/api/clusters/{cluster_id}" if cluster_id is not None else None
         x1, y1, x2, y2 = bbox
         faces.append(PhotoFaceDetail(
+            md5=md5,
             bbox=bbox,
             score=float(fr.get("score", 0.0)),
             sticky_name=fr.get("name"),

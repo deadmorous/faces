@@ -83,7 +83,9 @@ function route() {
       renderClassify(parts[1] === "page" ? parseInt(parts[2], 10) || 1 : 1);
       break;
     case "clusters":
-      if (parts[1]) renderClusterDetail(parseInt(parts[1], 10));
+      if (parts[1] === "page") renderClusters(parseInt(parts[2], 10) || 1);
+      else if (parts[1] && parts[2] === "page") renderClusterDetail(parseInt(parts[1], 10), parseInt(parts[3], 10) || 1);
+      else if (parts[1]) renderClusterDetail(parseInt(parts[1], 10));
       else renderClusters();
       break;
     case "photos":
@@ -111,18 +113,20 @@ window.addEventListener("DOMContentLoaded", route);
 // ---------------------------------------------------------------------------
 const CLASSIFY_PAGE_SIZE = 10;
 
-async function renderClassify(page = 1) {
+async function renderClassify(page = 1, threshold = null) {
   showSpinner();
   let data, people;
   try {
+    const threshParam = threshold !== null ? `&threshold=${threshold}` : "";
     [data, people] = await Promise.all([
-      apiFetch(`/api/classify/candidates?min_size=3&page=${page}&page_size=${CLASSIFY_PAGE_SIZE}`),
+      apiFetch(`/api/classify/candidates?min_size=3&page=${page}&page_size=${CLASSIFY_PAGE_SIZE}${threshParam}`),
       apiFetch("/api/people"),
     ]);
   } catch (e) {
     showError(e.message);
     return;
   }
+  const effectiveThreshold = threshold !== null ? threshold : data.eps;
 
   // Known people names, sorted, excluding special labels
   const knownNames = people
@@ -143,7 +147,12 @@ async function renderClassify(page = 1) {
   const totalPages = Math.ceil(data.total_groups / CLASSIFY_PAGE_SIZE);
 
   // Build HTML
-  let html = `<h2>Classify <span class="badge">${data.total_groups} groups</span></h2>`;
+  let html = `
+    <h2>Classify <span class="badge">${data.total_groups} groups</span></h2>
+    <div class="threshold-row">
+      <label>Threshold: <strong id="thresh-val">${effectiveThreshold.toFixed(2)}</strong></label>
+      <input type="range" id="thresh-slider" min="0.1" max="2.0" step="0.01" value="${effectiveThreshold}">
+    </div>`;
 
   if (groups.length === 0 && unmatched.length === 0) {
     html += `<p>No classify candidates found. Run <code>scan</code> and <code>clusterize</code> first.</p>`;
@@ -215,6 +224,14 @@ async function renderClassify(page = 1) {
 
   html += `<button id="submit-labels" style="margin-top:1rem;">Submit labels</button>`;
   app.innerHTML = html;
+
+  // Threshold slider
+  let threshTimer;
+  document.getElementById("thresh-slider").addEventListener("input", e => {
+    document.getElementById("thresh-val").textContent = parseFloat(e.target.value).toFixed(2);
+    clearTimeout(threshTimer);
+    threshTimer = setTimeout(() => renderClassify(1, parseFloat(e.target.value)), 400);
+  });
 
   // Store name input back-refs
   groups.forEach((g, gi) => { g.nameEl = document.getElementById(`name-${gi}`); });
@@ -310,7 +327,7 @@ async function renderClassify(page = 1) {
     try {
       const resp = await apiPost("/api/classify/labels", items);
       btn.textContent = `Done — ${resp.labeled} labeled`;
-      setTimeout(() => renderClassify(page), 1500);
+      setTimeout(() => renderClassify(page, effectiveThreshold), 1500);
     } catch (e) {
       btn.disabled = false;
       btn.textContent = "Submit labels";
@@ -322,24 +339,36 @@ async function renderClassify(page = 1) {
 // ---------------------------------------------------------------------------
 // View: Clusters
 // ---------------------------------------------------------------------------
-async function renderClusters() {
+async function renderClusters(page = 1) {
   showSpinner();
   let data;
   try {
-    data = await apiFetch("/api/clusters?min_size=1");
+    data = await apiFetch(`/api/clusters?min_size=1&page=${page}&page_size=100`);
   } catch (e) {
     showError(e.message);
     return;
   }
 
   const app = document.getElementById("app");
-  if (!data.length) {
+  if (!data.total) {
     app.innerHTML = `<h2>Clusters</h2><p>No clusters yet. Use the <a href="#/clusters">clusterize panel</a> or run <code>python -m faces clusterize</code>.</p>`;
     return;
   }
 
-  let html = `<h2>Clusters <span class="badge">${data.length}</span></h2><div class="cluster-grid">`;
-  data.forEach(c => {
+  const totalPages = Math.ceil(data.total / data.page_size);
+
+  function pageNav() {
+    if (totalPages <= 1) return "";
+    let nav = `<nav class="pagination">`;
+    if (page > 1) nav += `<a href="#/clusters/page/${page - 1}">← Prev</a>`;
+    nav += `<span>Page ${page} / ${totalPages}</span>`;
+    if (page < totalPages) nav += `<a href="#/clusters/page/${page + 1}">Next →</a>`;
+    nav += `</nav>`;
+    return nav;
+  }
+
+  let html = `<h2>Clusters <span class="badge">${data.total}</span></h2>${pageNav()}<div class="cluster-grid">`;
+  data.clusters.forEach(c => {
     const name = c.name ? escHtml(c.name) : `<em>Unnamed #${c.id}</em>`;
     const thumbs = c.sample_faces.slice(0, 4).map(f =>
       `<img src="${f.img_url}" loading="lazy" alt="">`
@@ -351,9 +380,8 @@ async function renderClusters() {
         <span class="cluster-size badge">${c.size} faces</span>
       </article>`;
   });
-  html += `</div>`;
+  html += `</div>${pageNav()}`;
 
-  // Clusterize panel at bottom
   html += clusterizePanelHtml();
   app.innerHTML = html;
 
@@ -369,11 +397,11 @@ async function renderClusters() {
 // ---------------------------------------------------------------------------
 // View: Cluster Detail
 // ---------------------------------------------------------------------------
-async function renderClusterDetail(id) {
+async function renderClusterDetail(id, page = 1) {
   showSpinner();
   let data;
   try {
-    data = await apiFetch(`/api/clusters/${id}`);
+    data = await apiFetch(`/api/clusters/${id}?page=${page}&page_size=200`);
   } catch (e) {
     showError(e.message);
     return;
@@ -381,6 +409,17 @@ async function renderClusterDetail(id) {
 
   const app = document.getElementById("app");
   const name = data.name || "";
+  const totalPages = Math.ceil(data.size / data.page_size);
+
+  function pageNav() {
+    if (totalPages <= 1) return "";
+    let nav = `<nav class="pagination">`;
+    if (page > 1) nav += `<a href="#/clusters/${id}/page/${page - 1}">← Prev</a>`;
+    nav += `<span>Page ${page} / ${totalPages}</span>`;
+    if (page < totalPages) nav += `<a href="#/clusters/${id}/page/${page + 1}">Next →</a>`;
+    nav += `</nav>`;
+    return nav;
+  }
 
   let html = `
     <p class="breadcrumb"><a href="#/clusters">← Clusters</a></p>
@@ -393,6 +432,7 @@ async function renderClusterDetail(id) {
       <button type="submit">Save</button>
       <span id="rename-status" style="font-size:0.85rem;color:var(--pico-muted-color);"></span>
     </form>
+    ${pageNav()}
     <div class="face-grid">
       ${data.faces.map(f => `
         <div class="face-cell">
@@ -403,6 +443,7 @@ async function renderClusterDetail(id) {
         </div>
       `).join("")}
     </div>
+    ${pageNav()}
     ${clusterizePanelHtml()}
   `;
 
@@ -664,7 +705,7 @@ async function renderPersonDetail(name) {
 // ---------------------------------------------------------------------------
 // View: Similar faces
 // ---------------------------------------------------------------------------
-async function renderSimilar(md5, bboxParam, unlabeledOnly = false) {
+async function renderSimilar(md5, bboxParam, unlabeledOnly = false, maxDist = null) {
   showSpinner();
   const bboxQuery = bboxParam.replace(/-/g, ",");
   let data, people;
@@ -683,7 +724,13 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = false) {
     .filter(n => !SPECIAL_LABELS.includes(n))
     .sort((a, b) => a.localeCompare(b));
 
-  const selected = new Set(data.faces.map(f => `${f.md5}:${bboxToQuery(f.bbox)}`));
+  const allFaces = data.faces;
+  const maxResultDist = allFaces.length > 0 ? Math.max(...allFaces.map(f => f.dist)) : 1.0;
+  const sliderMax = Math.max(maxResultDist * 1.1, 0.5);
+  const effectiveMaxDist = maxDist !== null ? maxDist : maxResultDist;
+  const visibleFaces = allFaces.filter(f => f.dist <= effectiveMaxDist);
+
+  const selected = new Set(visibleFaces.map(f => `${f.md5}:${bboxToQuery(f.bbox)}`));
   const app = document.getElementById("app");
 
   const seedName = data.seed.name
@@ -696,21 +743,25 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = false) {
     <div class="similar-seed">
       <img src="${data.seed.img_url}" class="seed-thumb" alt="">
       <div>
-        <div>${escHtml(data.seed.photo_path)}</div>
+        <div>${escHtml(data.seed.photo_path)} <a href="#/photos/${data.seed.md5}" title="Open photo">↗</a></div>
         ${seedName}
         <label style="display:flex;align-items:center;gap:0.5rem;margin-top:0.5rem;cursor:pointer;">
           <input type="checkbox" id="unlabeled-only"${unlabeledOnly ? " checked" : ""}> Unlabeled only
         </label>
       </div>
     </div>
+    <div class="threshold-row">
+      <label>Max dist: <strong id="thresh-val">${effectiveMaxDist.toFixed(2)}</strong></label>
+      <input type="range" id="thresh-slider" min="0.0" max="${sliderMax.toFixed(2)}" step="0.01" value="${effectiveMaxDist}">
+    </div>
     <div style="display:flex;align-items:center;gap:0.75rem;margin:0.5rem 0;">
       <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;margin:0;">
         <input type="checkbox" id="select-all-similar" checked> Select all
       </label>
-      <span class="dist-tag">${data.faces.length} result${data.faces.length !== 1 ? "s" : ""}</span>
+      <span class="dist-tag">${visibleFaces.length} result${visibleFaces.length !== 1 ? "s" : ""}</span>
     </div>
     <div class="face-grid">
-      ${data.faces.map((f, fi) => `
+      ${visibleFaces.map((f, fi) => `
         <div class="face-cell">
           <img src="${f.img_url}" data-fi="${fi}" class="selected" loading="lazy"
                title="${escHtml(f.photo_path)}${f.name ? " · " + escHtml(f.name) : ""} (dist ${f.dist.toFixed(3)})">
@@ -735,7 +786,7 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = false) {
     if (selected.size === 0) {
       cb.checked = false;
       cb.indeterminate = false;
-    } else if (selected.size === data.faces.length) {
+    } else if (selected.size === visibleFaces.length) {
       cb.checked = true;
       cb.indeterminate = false;
     } else {
@@ -744,10 +795,17 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = false) {
     }
   }
 
+  let threshTimer;
+  document.getElementById("thresh-slider").addEventListener("input", e => {
+    document.getElementById("thresh-val").textContent = parseFloat(e.target.value).toFixed(2);
+    clearTimeout(threshTimer);
+    threshTimer = setTimeout(() => renderSimilar(md5, bboxParam, unlabeledOnly, parseFloat(e.target.value)), 300);
+  });
+
   document.getElementById("select-all-similar").addEventListener("change", e => {
     const imgs = app.querySelectorAll(".face-grid img");
     if (e.target.checked) {
-      data.faces.forEach(f => selected.add(`${f.md5}:${bboxToQuery(f.bbox)}`));
+      visibleFaces.forEach(f => selected.add(`${f.md5}:${bboxToQuery(f.bbox)}`));
       imgs.forEach(img => { img.className = "selected"; });
     } else {
       selected.clear();
@@ -756,13 +814,13 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = false) {
   });
 
   document.getElementById("unlabeled-only").addEventListener("change", e => {
-    renderSimilar(md5, bboxParam, e.target.checked);
+    renderSimilar(md5, bboxParam, e.target.checked, effectiveMaxDist);
   });
 
   app.querySelectorAll(".face-grid img").forEach(img => {
     img.addEventListener("click", () => {
       const fi = parseInt(img.dataset.fi, 10);
-      const f = data.faces[fi];
+      const f = visibleFaces[fi];
       const key = `${f.md5}:${bboxToQuery(f.bbox)}`;
       if (selected.has(key)) {
         selected.delete(key);
@@ -777,7 +835,7 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = false) {
 
   document.getElementById("similar-submit").addEventListener("click", async () => {
     const label = document.getElementById("similar-label").value.trim() || null;
-    const items = data.faces
+    const items = visibleFaces
       .filter(f => selected.has(`${f.md5}:${bboxToQuery(f.bbox)}`))
       .map(f => ({ md5: f.md5, bbox: f.bbox, name: label }));
 
@@ -792,7 +850,7 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = false) {
     try {
       const resp = await apiPost("/api/classify/labels", items);
       btn.textContent = `Done — ${resp.labeled} labeled`;
-      setTimeout(() => renderSimilar(md5, bboxParam, unlabeledOnly), 1500);
+      setTimeout(() => renderSimilar(md5, bboxParam, unlabeledOnly, effectiveMaxDist), 1500);
     } catch (e) {
       btn.disabled = false;
       btn.textContent = "Apply to selected";

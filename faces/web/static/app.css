@@ -232,6 +232,28 @@
   white-space: nowrap;
 }
 
+/* Threshold slider row */
+.threshold-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.5rem 0 0.75rem;
+  flex-wrap: wrap;
+}
+
+.threshold-row label {
+  white-space: nowrap;
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.threshold-row input[type="range"] {
+  flex: 1;
+  min-width: 150px;
+  max-width: 300px;
+  margin: 0;
+}
+
 /* Classify view */
 .classify-group {
   border: 1px solid var(--pico-muted-border-color);

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ..deps import get_cfg, get_db
 from ..models import (
-    ClusterDetail, ClusterPatchRequest, ClusterPatchResponse,
+    ClusterDetail, ClusterList, ClusterPatchRequest, ClusterPatchResponse,
     ClusterSummary, FaceDetail, FaceSample,
 )
 from ...config import Config
@@ -21,11 +21,13 @@ def _face_img_url(md5: str, bbox: list[int]) -> str:
     return f"/img/face?md5={md5}&bbox={x1},{y1},{x2},{y2}"
 
 
-@router.get("", response_model=list[ClusterSummary], summary="List all clusters")
+@router.get("", response_model=ClusterList, summary="List all clusters")
 def list_clusters(
     min_size: int = 1,
     max_size: Optional[int] = None,
     named_only: bool = False,
+    page: int = 1,
+    page_size: int = 100,
     db: Annotated[Database, Depends(get_db)] = ...,
 ):
     """List all clusters sorted by size descending."""
@@ -67,16 +69,25 @@ def list_clusters(
         ))
 
     results.sort(key=lambda c: c.size, reverse=True)
-    return results
+    total = len(results)
+    start = (page - 1) * page_size
+    return ClusterList(
+        total=total,
+        page=page,
+        page_size=page_size,
+        clusters=results[start:start + page_size],
+    )
 
 
 @router.get("/{cluster_id}", response_model=ClusterDetail, summary="Cluster detail with all faces")
 def get_cluster(
     cluster_id: int,
+    page: int = 1,
+    page_size: int = 200,
     db: Annotated[Database, Depends(get_db)] = ...,
     cfg: Annotated[Config, Depends(get_cfg)] = ...,
 ):
-    """Return full cluster detail including all face thumbnails and links."""
+    """Return cluster detail with paginated face thumbnails."""
     cluster_rows = (
         db.clusters.search()
         .where(f"cluster_id = {cluster_id}", prefilter=True)
@@ -86,7 +97,11 @@ def get_cluster(
     if not cluster_rows:
         raise HTTPException(status_code=404, detail=f"Cluster {cluster_id} not found")
 
-    # Build md5 → photo row map
+    total_size = len(cluster_rows)
+    start = (page - 1) * page_size
+    cluster_rows = cluster_rows[start:start + page_size]
+
+    # Build md5 → photo row map (only for this page)
     needed_md5s = {r["md5"] for r in cluster_rows}
     photo_map: dict[str, dict] = {}
     for md5 in needed_md5s:
@@ -135,7 +150,9 @@ def get_cluster(
     return ClusterDetail(
         id=cluster_id,
         name=cluster_name,
-        size=len(faces),
+        size=total_size,
+        page=page,
+        page_size=page_size,
         faces=faces,
     )
 
