@@ -683,7 +683,7 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = false) {
     .filter(n => !SPECIAL_LABELS.includes(n))
     .sort((a, b) => a.localeCompare(b));
 
-  const selected = new Set();
+  const selected = new Set(data.faces.map(f => `${f.md5}:${bboxToQuery(f.bbox)}`));
   const app = document.getElementById("app");
 
   const seedName = data.seed.name
@@ -703,11 +703,16 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = false) {
         </label>
       </div>
     </div>
-    <p class="dist-tag">${data.faces.length} result${data.faces.length !== 1 ? "s" : ""}</p>
+    <div style="display:flex;align-items:center;gap:0.75rem;margin:0.5rem 0;">
+      <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;margin:0;">
+        <input type="checkbox" id="select-all-similar" checked> Select all
+      </label>
+      <span class="dist-tag">${data.faces.length} result${data.faces.length !== 1 ? "s" : ""}</span>
+    </div>
     <div class="face-grid">
       ${data.faces.map((f, fi) => `
         <div class="face-cell">
-          <img src="${f.img_url}" data-fi="${fi}" class="deselected" loading="lazy"
+          <img src="${f.img_url}" data-fi="${fi}" class="selected" loading="lazy"
                title="${escHtml(f.photo_path)}${f.name ? " · " + escHtml(f.name) : ""} (dist ${f.dist.toFixed(3)})">
           <a href="#/photos/${f.md5}" target="_blank" class="face-link-btn" title="Open photo">↗</a>
         </div>
@@ -723,6 +728,32 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = false) {
     </div>`;
 
   app.innerHTML = html;
+
+  function _updateSelectAllCheckbox() {
+    const cb = document.getElementById("select-all-similar");
+    if (!cb) return;
+    if (selected.size === 0) {
+      cb.checked = false;
+      cb.indeterminate = false;
+    } else if (selected.size === data.faces.length) {
+      cb.checked = true;
+      cb.indeterminate = false;
+    } else {
+      cb.checked = false;
+      cb.indeterminate = true;
+    }
+  }
+
+  document.getElementById("select-all-similar").addEventListener("change", e => {
+    const imgs = app.querySelectorAll(".face-grid img");
+    if (e.target.checked) {
+      data.faces.forEach(f => selected.add(`${f.md5}:${bboxToQuery(f.bbox)}`));
+      imgs.forEach(img => { img.className = "selected"; });
+    } else {
+      selected.clear();
+      imgs.forEach(img => { img.className = "deselected"; });
+    }
+  });
 
   document.getElementById("unlabeled-only").addEventListener("change", e => {
     renderSimilar(md5, bboxParam, e.target.checked);
@@ -740,6 +771,7 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = false) {
         selected.add(key);
         img.className = "selected";
       }
+      _updateSelectAllCheckbox();
     });
   });
 
