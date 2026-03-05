@@ -103,9 +103,10 @@ def classify_candidates(
         for name in person_names
     }
 
+    from scipy.spatial.distance import cdist
+
     unlabeled_X = X[unlabeled_indices]
-    diff = unlabeled_X[:, None, :] - labeled_X[None, :, :]
-    D = np.sqrt((diff ** 2).sum(axis=2))
+    D = cdist(unlabeled_X, labeled_X, metric="euclidean")
 
     per_person = np.stack(
         [D[:, person_col_map[name]].min(axis=1) for name in person_names],
@@ -136,7 +137,7 @@ def classify_candidates(
     for person in person_names:
         if person not in person_groups:
             continue
-        faces = sorted(person_groups[person], key=lambda f: f["dist"])
+        faces = sorted(person_groups[person], key=lambda f: f["dist"])[:100]
         avg_dist = sum(f["dist"] for f in faces) / len(faces)
         groups.append({
             "person": person,

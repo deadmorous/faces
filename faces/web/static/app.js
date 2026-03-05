@@ -80,7 +80,7 @@ function route() {
 
   switch (parts[0]) {
     case "classify":
-      renderClassify();
+      renderClassify(parts[1] === "page" ? parseInt(parts[2], 10) || 1 : 1);
       break;
     case "clusters":
       if (parts[1]) renderClusterDetail(parseInt(parts[1], 10));
@@ -96,7 +96,7 @@ function route() {
       else renderPeople();
       break;
     default:
-      renderClassify();
+      renderClassify(1);
   }
 }
 
@@ -106,12 +106,14 @@ window.addEventListener("DOMContentLoaded", route);
 // ---------------------------------------------------------------------------
 // View: Classify
 // ---------------------------------------------------------------------------
-async function renderClassify() {
+const CLASSIFY_PAGE_SIZE = 10;
+
+async function renderClassify(page = 1) {
   showSpinner();
   let data, people;
   try {
     [data, people] = await Promise.all([
-      apiFetch("/api/classify/candidates?min_size=3"),
+      apiFetch(`/api/classify/candidates?min_size=3&page=${page}&page_size=${CLASSIFY_PAGE_SIZE}`),
       apiFetch("/api/people"),
     ]);
   } catch (e) {
@@ -125,18 +127,20 @@ async function renderClassify() {
     .filter(n => !SPECIAL_LABELS.includes(n))
     .sort((a, b) => a.localeCompare(b));
 
-  // JS state
+  // JS state — start with everything deselected
   const groups = data.groups.map(g => ({
     ...g,
-    deselected: new Set(),
+    deselected: new Set(g.faces.map(f => `${f.md5}:${bboxToQuery(f.bbox)}`)),
     nameEl: null,
   }));
   const unmatched = data.unmatched.map(f => ({ ...f, label: "" }));
 
   const app = document.getElementById("app");
 
+  const totalPages = Math.ceil(data.total_groups / CLASSIFY_PAGE_SIZE);
+
   // Build HTML
-  let html = `<h2>Classify</h2>`;
+  let html = `<h2>Classify <span class="badge">${data.total_groups} groups</span></h2>`;
 
   if (groups.length === 0 && unmatched.length === 0) {
     html += `<p>No classify candidates found. Run <code>scan</code> and <code>clusterize</code> first.</p>`;
@@ -160,7 +164,7 @@ async function renderClassify() {
     html += `
       <div class="classify-group" data-group="${gi}">
         <div class="classify-group-header">
-          <input type="checkbox" id="chk-all-${gi}" checked title="Select all">
+          <input type="checkbox" id="chk-all-${gi}" title="Select all">
           <select id="name-${gi}">${options}</select>
           <span class="dist-tag">avg dist: ${g.avg_dist.toFixed(3)}</span>
         </div>
@@ -168,7 +172,7 @@ async function renderClassify() {
           ${g.faces.map((f, fi) => `
             <div class="face-cell">
               <img src="${f.img_url}" data-group="${gi}" data-face="${fi}"
-                   class="selected" title="${escHtml(f.photo_path)} (dist ${f.dist.toFixed(3)})"
+                   class="deselected" title="${escHtml(f.photo_path)} (dist ${f.dist.toFixed(3)})"
                    loading="lazy">
               <a href="#/photos/${f.md5}" target="_blank" class="face-link-btn" title="Open photo">↗</a>
             </div>
@@ -195,6 +199,14 @@ async function renderClassify() {
           `).join("")}
         </div>
       </details>`;
+  }
+
+  if (totalPages > 1) {
+    html += `<nav class="pagination" style="margin-top:1rem;">`;
+    if (page > 1) html += `<a href="#/classify/page/${page - 1}">← Prev</a>`;
+    html += `<span>Page ${page} / ${totalPages}</span>`;
+    if (page < totalPages) html += `<a href="#/classify/page/${page + 1}">Next →</a>`;
+    html += `</nav>`;
   }
 
   html += `<button id="submit-labels" style="margin-top:1rem;">Submit labels</button>`;
@@ -294,7 +306,7 @@ async function renderClassify() {
     try {
       const resp = await apiPost("/api/classify/labels", items);
       btn.textContent = `Done — ${resp.labeled} labeled`;
-      setTimeout(() => renderClassify(), 1500);
+      setTimeout(() => renderClassify(page), 1500);
     } catch (e) {
       btn.disabled = false;
       btn.textContent = "Submit labels";

@@ -136,6 +136,7 @@ class UnmatchedFace(BaseModel):
 
 class ClassifyCandidates(BaseModel):
     eps: float
+    total_groups: int
     groups: list[ClassifyGroup]
     unmatched: list[UnmatchedFace]
 

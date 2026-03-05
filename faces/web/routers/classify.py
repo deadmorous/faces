@@ -1,5 +1,6 @@
 """/api/classify — batch-by-person classify candidates and bulk label submission."""
 
+from collections import defaultdict
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,7 +12,7 @@ from ..models import (
 )
 from ...algo import classify_candidates
 from ...config import Config
-from ...db import Database, stick_face
+from ...db import Database
 
 router = APIRouter(prefix="/api/classify", tags=["classify"])
 
@@ -36,6 +37,8 @@ def _photo_path_for_md5(db: Database, md5: str) -> str:
 def get_candidates(
     threshold: Optional[float] = None,
     min_size: int = 3,
+    page: int = 1,
+    page_size: int = 10,
     since: Optional[str] = None,
     until: Optional[str] = None,
     db: Annotated[Database, Depends(get_db)] = ...,
@@ -67,6 +70,11 @@ def get_candidates(
             path_cache[md5] = _photo_path_for_md5(db, md5)
         return path_cache[md5]
 
+    all_groups = result["groups"]
+    total_groups = len(all_groups)
+    start = (page - 1) * page_size
+    page_groups = all_groups[start:start + page_size]
+
     groups = [
         ClassifyGroup(
             person=g["person"],
@@ -83,20 +91,28 @@ def get_candidates(
                 for f in g["faces"]
             ],
         )
-        for g in result["groups"]
+        for g in page_groups
     ]
 
-    unmatched = [
-        UnmatchedFace(
-            md5=f["md5"],
-            bbox=f["bbox"],
-            img_url=_face_img_url(f["md5"], f["bbox"]),
-            photo_url=f"/img/photo/{f['md5']}",
-        )
-        for f in result["unmatched"]
-    ]
+    # Unmatched only on page 1 to avoid re-rendering on every page navigation
+    unmatched = []
+    if page == 1:
+        unmatched = [
+            UnmatchedFace(
+                md5=f["md5"],
+                bbox=f["bbox"],
+                img_url=_face_img_url(f["md5"], f["bbox"]),
+                photo_url=f"/img/photo/{f['md5']}",
+            )
+            for f in result["unmatched"]
+        ]
 
-    return ClassifyCandidates(eps=result["eps"], groups=groups, unmatched=unmatched)
+    return ClassifyCandidates(
+        eps=result["eps"],
+        total_groups=total_groups,
+        groups=groups,
+        unmatched=unmatched,
+    )
 
 
 @router.post("/labels", response_model=ClassifyLabelsResponse,
@@ -110,20 +126,19 @@ def submit_labels(
     Faces omitted from the request are left unlabeled and will reappear in
     future calls to ``/api/classify/candidates``.
     """
-    labeled = 0
-    for item in items:
-        if item.name is None:
-            x1, y1, x2, y2 = item.bbox
-            db.faces.update(
-                where=(
-                    f"md5 = '{item.md5}' AND "
-                    f"bbox[1] = {x1} AND bbox[2] = {y1} AND "
-                    f"bbox[3] = {x2} AND bbox[4] = {y2}"
-                ),
-                values={"name": None},
-            )
-        else:
-            stick_face(db, item.md5, item.bbox, item.name)
-        labeled += 1
+    def _face_condition(item: FaceLabelItem) -> str:
+        x1, y1, x2, y2 = item.bbox
+        return (f"(md5 = '{item.md5}' AND "
+                f"bbox[1] = {x1} AND bbox[2] = {y1} AND "
+                f"bbox[3] = {x2} AND bbox[4] = {y2})")
 
-    return ClassifyLabelsResponse(labeled=labeled)
+    # Group by name so each unique label is one DB round-trip
+    by_name: dict[str | None, list[FaceLabelItem]] = defaultdict(list)
+    for item in items:
+        by_name[item.name].append(item)
+
+    for name, group_items in by_name.items():
+        where = " OR ".join(_face_condition(i) for i in group_items)
+        db.faces.update(where=where, values={"name": name})
+
+    return ClassifyLabelsResponse(labeled=len(items))
