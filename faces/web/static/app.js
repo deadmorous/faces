@@ -771,7 +771,8 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = false, maxDist = nu
     </div>
     <div class="similar-label-row">
       <input type="text" id="similar-label" list="similar-people-datalist"
-             placeholder="Label — empty to clear">
+             placeholder="Label — empty to clear"
+             value="${data.seed.name ? escHtml(data.seed.name) : ""}">
       <datalist id="similar-people-datalist">
         ${knownNames.map(n => `<option value="${escHtml(n)}">`).join("")}
       </datalist>
