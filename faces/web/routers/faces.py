@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from ..deps import get_db
 from ..models import FaceLabelRequest, SimilarFace, SimilarFacesResponse
-from ...db import Database, load_all_embeddings, stick_face
+from ...db import Database, stick_face
 
 router = APIRouter(prefix="/api/faces", tags=["faces"])
 
@@ -81,20 +81,22 @@ def get_similar_faces(
     except ValueError:
         raise HTTPException(status_code=422, detail="bbox must be x1,y1,x2,y2 integers")
 
-    rows, X = load_all_embeddings(db)
-    if not rows:
-        raise HTTPException(status_code=404, detail="No faces in database")
-
-    seed_idx = next(
-        (i for i, r in enumerate(rows)
-         if r["md5"] == md5 and list(r["bbox"]) == [x1, y1, x2, y2]),
-        None,
+    # Look up seed face
+    seed_rows = (
+        db.faces.search()
+        .where(
+            f"md5 = '{md5}' AND "
+            f"bbox[1] = {x1} AND bbox[2] = {y1} AND "
+            f"bbox[3] = {x2} AND bbox[4] = {y2}",
+            prefilter=True,
+        )
+        .limit(1)
+        .to_list()
     )
-    if seed_idx is None:
+    if not seed_rows:
         raise HTTPException(status_code=404, detail="Face not found")
-
-    dists = np.sqrt(((X - X[seed_idx]) ** 2).sum(axis=1))
-    order = np.argsort(dists)
+    seed_row = seed_rows[0]
+    seed_embedding = seed_row["embedding"]
 
     # Photo path cache
     path_cache: dict[str, str] = {}
@@ -107,27 +109,32 @@ def get_similar_faces(
             path_cache[fmd5] = prows[0]["path"] if prows else ""
         return path_cache[fmd5]
 
-    def _make(i: int) -> SimilarFace:
-        r = rows[i]
+    def _make(r: dict) -> SimilarFace:
         bx1, by1, bx2, by2 = r["bbox"]
         return SimilarFace(
             md5=r["md5"],
             bbox=list(r["bbox"]),
-            dist=float(dists[i]),
+            dist=float(r.get("_distance", 0.0)) ** 0.5,
             name=r.get("name"),
             img_url=f"/img/face?md5={r['md5']}&bbox={bx1},{by1},{bx2},{by2}",
             photo_path=_photo_path(r["md5"]),
         )
 
-    seed_face = _make(seed_idx)
+    # Fetch generously so Python-side filtering (seed + unlabeled_only) still
+    # yields up to `limit` results. LanceDB returns _distance = squared L2.
+    fetch_n = limit * 3 + 1 if unlabeled_only else limit + 1
+    candidates = db.faces.search(seed_embedding).limit(fetch_n).to_list()
+
+    seed_face = _make(seed_row)
+    seed_face.dist = 0.0
 
     results: list[SimilarFace] = []
-    for i in order:
-        if i == seed_idx:
+    for r in candidates:
+        if r["md5"] == md5 and list(r["bbox"]) == [x1, y1, x2, y2]:
+            continue  # skip seed
+        if unlabeled_only and r.get("name"):
             continue
-        if unlabeled_only and rows[i].get("name"):
-            continue
-        results.append(_make(i))
+        results.append(_make(r))
         if len(results) >= limit:
             break
 
