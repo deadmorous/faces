@@ -2,7 +2,6 @@
 
 from typing import Annotated
 
-import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from ..deps import get_db
@@ -81,21 +80,21 @@ def get_similar_faces(
     except ValueError:
         raise HTTPException(status_code=422, detail="bbox must be x1,y1,x2,y2 integers")
 
-    # Look up seed face
-    seed_rows = (
+    # Look up seed face — query by md5 only, match bbox in Python to avoid
+    # any LanceDB SQL array-indexing edge cases.
+    photo_faces = (
         db.faces.search()
-        .where(
-            f"md5 = '{md5}' AND "
-            f"bbox[1] = {x1} AND bbox[2] = {y1} AND "
-            f"bbox[3] = {x2} AND bbox[4] = {y2}",
-            prefilter=True,
-        )
-        .limit(1)
+        .where(f"md5 = '{md5}'", prefilter=True)
+        .limit(1000)
         .to_list()
     )
-    if not seed_rows:
+    target_bbox = [x1, y1, x2, y2]
+    seed_row = next(
+        (r for r in photo_faces if list(r["bbox"]) == target_bbox),
+        None,
+    )
+    if seed_row is None:
         raise HTTPException(status_code=404, detail="Face not found")
-    seed_row = seed_rows[0]
     seed_embedding = seed_row["embedding"]
 
     # Photo path cache
