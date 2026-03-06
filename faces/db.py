@@ -2,7 +2,6 @@
 
 import datetime
 import hashlib
-from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -38,20 +37,10 @@ _FACES_SCHEMA = pa.schema([
     pa.field("name", pa.utf8()),       # nullable; sticky label set by `rename --stick`
 ])
 
-_CLUSTERS_SCHEMA = pa.schema([
-    pa.field("md5",          pa.utf8()),
-    pa.field("bbox",         pa.list_(pa.int32(), 4)),
-    pa.field("cluster_id",   pa.int32()),
-    pa.field("name",         pa.utf8()),
-    pa.field("clustered_at", pa.timestamp("us", tz="UTC")),
-])
-
-
 @dataclass
 class Database:
     photos: lancedb.table.Table
     faces: lancedb.table.Table
-    clusters: lancedb.table.Table
 
 
 def _open_or_create(conn, name: str, schema):
@@ -80,7 +69,6 @@ def open_db(db_path: Path) -> Database:
     return Database(
         photos=photos_table,
         faces=faces_table,
-        clusters=_open_or_create(conn, "clusters", _CLUSTERS_SCHEMA),
     )
 
 
@@ -246,55 +234,6 @@ def load_all_embeddings(db: Database) -> tuple[list[dict], np.ndarray]:
             for r in all_rows]
     X = np.array([r["embedding"] for r in all_rows], dtype=np.float32)
     return rows, X
-
-
-def store_clusters(db: Database, rows: list[dict], labels: np.ndarray) -> int:
-    """Write one cluster row per face. Returns number of auto-named clusters."""
-    # Derive cluster name: all named faces in a cluster must agree; unnamed are neutral.
-    named_sets: dict[int, set] = defaultdict(set)
-    for row, label in zip(rows, labels):
-        name = row.get("name")
-        if name and name not in SPECIAL_LABELS:
-            named_sets[int(label)].add(name)
-    cluster_name: dict[int, str | None] = {
-        cid: (names.pop() if len(names) == 1 else None)
-        for cid, names in named_sets.items()
-    }
-
-    now = datetime.datetime.now(datetime.timezone.utc)
-    db.clusters.add([
-        {
-            "md5": row["md5"],
-            "bbox": row["bbox"],
-            "cluster_id": int(label),
-            "name": cluster_name.get(int(label)),
-            "clustered_at": now,
-        }
-        for row, label in zip(rows, labels)
-    ])
-    return sum(1 for n in cluster_name.values() if n is not None)
-
-
-def reset_clusters(db: Database) -> None:
-    db.clusters.delete("1=1")
-
-
-def stick_faces(db: Database, cluster_id: int, name: str) -> int:
-    """Stamp *name* onto every face row belonging to *cluster_id*. Returns count."""
-    cluster_rows = (
-        db.clusters.search()
-        .where(f"cluster_id = {cluster_id}", prefilter=True)
-        .to_list()
-    )
-    for row in cluster_rows:
-        x1, y1, x2, y2 = row["bbox"]
-        db.faces.update(
-            where=(f"md5 = '{row['md5']}' AND "
-                   f"bbox[1] = {x1} AND bbox[2] = {y1} AND "
-                   f"bbox[3] = {x2} AND bbox[4] = {y2}"),
-            values={"name": name},
-        )
-    return len(cluster_rows)
 
 
 def stick_face(db: Database, md5: str, bbox: list[int], name: str) -> None:

@@ -1,9 +1,7 @@
-import sys
-
 import click
 
 from ..config import Config
-from ..db import load_photo_dates, open_db, parse_date
+from ..db import SPECIAL_LABELS, load_photo_dates, open_db, parse_date
 
 
 @click.command()
@@ -24,7 +22,7 @@ def show(cfg: Config, person: str | None, all_people: bool,
          since: str | None, until: str | None) -> None:
     """Show photos that contain PERSON.
 
-    PERSON may be a name assigned with 'rename' or a raw cluster ID.
+    PERSON is a name assigned via the Classify or Similarity views.
     When --all-people is given, lists every named person instead.
     """
     try:
@@ -36,14 +34,14 @@ def show(cfg: Config, person: str | None, all_people: bool,
     db = open_db(cfg.database)
 
     if all_people:
-        rows = db.clusters.search().limit(10_000_000).to_list()
+        face_rows = db.faces.search().limit(10_000_000).to_list()
         names: dict[str, int] = {}
-        for row in rows:
+        for row in face_rows:
             n = row.get("name")
-            if n:
+            if n and n not in SPECIAL_LABELS:
                 names[n] = names.get(n, 0) + 1
         if not names:
-            click.echo("No named people found. Use `rename` to label clusters.")
+            click.echo("No named people found. Use Classify or Similarity views to add labels.")
             return
         for name, count in sorted(names.items()):
             click.echo(f"{name}  ({count} faces)")
@@ -56,23 +54,18 @@ def show(cfg: Config, person: str | None, all_people: bool,
         raise click.UsageError(
             "--absolute requires photos_dir to be set in the config.")
 
-    # Resolve PERSON: try as cluster_id integer, else treat as name.
-    try:
-        cluster_id = int(person)
-        where = f"cluster_id = {cluster_id}"
-    except ValueError:
-        where = f"name = '{person}'"
-
-    cluster_rows = (
-        db.clusters.search()
-        .where(where, prefilter=True)
+    safe_person = person.replace("'", "''")
+    face_rows = (
+        db.faces.search()
+        .where(f"name = '{safe_person}'", prefilter=True)
+        .limit(10_000_000)
         .to_list()
     )
-    if not cluster_rows:
-        raise click.ClickException(f"No cluster found for {person!r}.")
+    if not face_rows:
+        raise click.ClickException(f"No labeled faces found for {person!r}.")
 
     # Collect unique md5s, then apply time filter and look up photo paths.
-    md5s = {r["md5"] for r in cluster_rows}
+    md5s = {r["md5"] for r in face_rows}
 
     if since_ts is not None or until_ts is not None:
         photo_dates = load_photo_dates(db)

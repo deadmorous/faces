@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 
 from ..config import load
 from ..db import open_db
-from .routers import classify, clusterize, clusters, faces, images, people, photos
+from .routers import classify, faces, images, people, photos
 
 
 @asynccontextmanager
@@ -46,9 +46,7 @@ def root_redirect():
 
 
 app.include_router(images.router)
-app.include_router(clusters.router)
 app.include_router(people.router)
 app.include_router(photos.router)
 app.include_router(faces.router)
 app.include_router(classify.router)
-app.include_router(clusterize.router)

@@ -2,14 +2,9 @@ import click
 
 from . import config as _config
 from .commands.classify import classify
-from .commands.clusterize import clusterize
-from .commands.label import label
-from .commands.list_clusters import list_clusters
 from .commands.optimize import optimize
-from .commands.rename import rename
 from .commands.scan import scan
 from .commands.show import show
-from .commands.stick import stick
 
 
 @click.group()
@@ -30,8 +25,6 @@ def cli(ctx: click.Context, config_file: str | None, db: str | None,
 
     \b
         faces scan ~/Photos          # detect and index faces
-        faces clusterize             # group faces into people
-        faces rename 3 "Alice"       # label cluster 3 as Alice
         faces show Alice             # browse photos with Alice
     """
     ctx.ensure_object(dict)
@@ -53,11 +46,6 @@ def cli(ctx: click.Context, config_file: str | None, db: str | None,
 
 
 cli.add_command(scan)
-cli.add_command(clusterize)
 cli.add_command(classify)
-cli.add_command(list_clusters)
-cli.add_command(label)
-cli.add_command(rename)
-cli.add_command(stick)
 cli.add_command(show)
 cli.add_command(optimize)

@@ -1,6 +1,5 @@
 """/api/photos — paginated photo list and per-photo detail."""
 
-from collections import defaultdict
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -79,7 +78,7 @@ def get_photo(
     db: Annotated[Database, Depends(get_db)] = ...,
     cfg: Annotated[Config, Depends(get_cfg)] = ...,
 ):
-    """Return photo metadata plus every detected face with labels and cluster links."""
+    """Return photo metadata plus every detected face with labels."""
     photo_rows = (
         db.photos.search()
         .where(f"md5 = '{md5}'", prefilter=True)
@@ -98,31 +97,16 @@ def get_photo(
         .to_list()
     )
 
-    # Build bbox → cluster_id map from clusters table
-    cluster_rows = (
-        db.clusters.search()
-        .where(f"md5 = '{md5}'", prefilter=True)
-        .limit(10_000_000)
-        .to_list()
-    )
-    bbox_to_cluster: dict[tuple, int] = {}
-    for cr in cluster_rows:
-        bbox_to_cluster[tuple(cr["bbox"])] = cr["cluster_id"]
-
     faces = []
     for fr in face_rows:
         bbox = list(fr["bbox"])
-        cluster_id = bbox_to_cluster.get(tuple(bbox))
-        cluster_url = f"/api/clusters/{cluster_id}" if cluster_id is not None else None
         x1, y1, x2, y2 = bbox
         faces.append(PhotoFaceDetail(
             md5=md5,
             bbox=bbox,
             score=float(fr.get("score", 0.0)),
             sticky_name=fr.get("name"),
-            cluster_id=cluster_id,
             img_url=f"/img/face?md5={md5}&bbox={x1},{y1},{x2},{y2}",
-            cluster_url=cluster_url,
         ))
 
     rel = photo_row["path"]

@@ -11,22 +11,6 @@ class FaceSample(BaseModel):
     img_url: str
 
 
-# --- Clusters ---
-
-class ClusterSummary(BaseModel):
-    id: int
-    name: Optional[str]
-    size: int
-    sample_faces: list[FaceSample]
-
-
-class ClusterList(BaseModel):
-    total: int
-    page: int
-    page_size: int
-    clusters: list[ClusterSummary]
-
-
 class FaceDetail(BaseModel):
     md5: str
     bbox: list[int]
@@ -36,26 +20,6 @@ class FaceDetail(BaseModel):
     photo_url: str
     photo_path: str
     photo_detail_url: str
-
-
-class ClusterDetail(BaseModel):
-    id: int
-    name: Optional[str]
-    size: int        # total faces in cluster
-    page: int
-    page_size: int
-    faces: list[FaceDetail]
-
-
-class ClusterPatchRequest(BaseModel):
-    name: str
-    stick: bool = False
-
-
-class ClusterPatchResponse(BaseModel):
-    cluster_id: int
-    name: str
-    faces_updated: int
 
 
 # --- People ---
@@ -115,9 +79,7 @@ class PhotoFaceDetail(BaseModel):
     bbox: list[int]
     score: float
     sticky_name: Optional[str]
-    cluster_id: Optional[int]
     img_url: str
-    cluster_url: Optional[str]
 
 
 class PhotoDetail(BaseModel):
@@ -192,15 +154,3 @@ class ClassifyLabelsResponse(BaseModel):
     labeled: int
 
 
-# --- Clusterize ---
-
-class ClusterizeRequest(BaseModel):
-    reset: bool = False
-    threshold: Optional[float] = None
-
-
-class ClusterizeResponse(BaseModel):
-    clusters_created: int
-    auto_named: int
-    must_link_pairs: int
-    cannot_link_pairs: int

@@ -82,12 +82,6 @@ function route() {
     case "classify":
       renderClassify(parts[1] === "page" ? parseInt(parts[2], 10) || 1 : 1);
       break;
-    case "clusters":
-      if (parts[1] === "page") renderClusters(parseInt(parts[2], 10) || 1);
-      else if (parts[1] && parts[2] === "page") renderClusterDetail(parseInt(parts[1], 10), parseInt(parts[3], 10) || 1);
-      else if (parts[1]) renderClusterDetail(parseInt(parts[1], 10));
-      else renderClusters();
-      break;
     case "photos":
       if (parts[1] === "page") renderPhotos(parseInt(parts[2], 10) || 1);
       else if (parts[1]) renderPhotoDetail(parts[1]);
@@ -162,7 +156,7 @@ async function renderClassify(page = 1, threshold = null) {
     </div>`;
 
   if (groups.length === 0 && unmatched.length === 0) {
-    html += `<p>No classify candidates found. Run <code>scan</code> and <code>clusterize</code> first.</p>`;
+    html += `<p>No classify candidates found. Run <code>scan</code> first, then label some faces.</p>`;
     app.innerHTML = html;
     return;
   }
@@ -374,172 +368,6 @@ async function renderClassify(page = 1, threshold = null) {
   });
 }
 
-// ---------------------------------------------------------------------------
-// View: Clusters
-// ---------------------------------------------------------------------------
-async function renderClusters(page = 1) {
-  showSpinner();
-  let data;
-  try {
-    data = await apiFetch(`/api/clusters?min_size=1&page=${page}&page_size=100`);
-  } catch (e) {
-    showError(e.message);
-    return;
-  }
-
-  const app = document.getElementById("app");
-  if (!data.total) {
-    app.innerHTML = `<h2>Clusters</h2><p>No clusters yet. Use the <a href="#/clusters">clusterize panel</a> or run <code>python -m faces clusterize</code>.</p>`;
-    return;
-  }
-
-  const totalPages = Math.ceil(data.total / data.page_size);
-
-  function pageNav() {
-    if (totalPages <= 1) return "";
-    let nav = `<nav class="pagination">`;
-    if (page > 1) nav += `<a href="#/clusters/page/${page - 1}">← Prev</a>`;
-    nav += `<span>Page ${page} / ${totalPages}</span>`;
-    if (page < totalPages) nav += `<a href="#/clusters/page/${page + 1}">Next →</a>`;
-    nav += `</nav>`;
-    return nav;
-  }
-
-  let html = `<h2>Clusters <span class="badge">${data.total}</span></h2>${pageNav()}<div class="cluster-grid">`;
-  data.clusters.forEach(c => {
-    const name = c.name ? escHtml(c.name) : `<em>Unnamed #${c.id}</em>`;
-    const thumbs = c.sample_faces.slice(0, 4).map(f =>
-      `<img src="${f.img_url}" loading="lazy" alt="">`
-    ).join("");
-    html += `
-      <article class="cluster-card" data-cid="${c.id}">
-        <div class="sample-faces">${thumbs}</div>
-        <p class="cluster-name">${name}</p>
-        <span class="cluster-size badge">${c.size} faces</span>
-      </article>`;
-  });
-  html += `</div>${pageNav()}`;
-
-  html += clusterizePanelHtml();
-  app.innerHTML = html;
-
-  app.querySelectorAll(".cluster-card").forEach(card => {
-    card.addEventListener("click", () => {
-      location.hash = `#/clusters/${card.dataset.cid}`;
-    });
-  });
-
-  attachClusterizePanel(app);
-}
-
-// ---------------------------------------------------------------------------
-// View: Cluster Detail
-// ---------------------------------------------------------------------------
-async function renderClusterDetail(id, page = 1) {
-  showSpinner();
-  let data;
-  try {
-    data = await apiFetch(`/api/clusters/${id}?page=${page}&page_size=200`);
-  } catch (e) {
-    showError(e.message);
-    return;
-  }
-
-  const app = document.getElementById("app");
-  const name = data.name || "";
-  const totalPages = Math.ceil(data.size / data.page_size);
-
-  function pageNav() {
-    if (totalPages <= 1) return "";
-    let nav = `<nav class="pagination">`;
-    if (page > 1) nav += `<a href="#/clusters/${id}/page/${page - 1}">← Prev</a>`;
-    nav += `<span>Page ${page} / ${totalPages}</span>`;
-    if (page < totalPages) nav += `<a href="#/clusters/${id}/page/${page + 1}">Next →</a>`;
-    nav += `</nav>`;
-    return nav;
-  }
-
-  let html = `
-    <p class="breadcrumb"><a href="#/clusters">← Clusters</a></p>
-    <h2>${name ? escHtml(name) : `Cluster #${id}`} <span class="badge">${data.size} faces</span></h2>
-    <form id="rename-form" style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem;">
-      <input type="text" id="cluster-name-input" value="${escHtml(name)}" placeholder="Name this cluster" style="flex:1;min-width:200px;">
-      <label style="display:flex;align-items:center;gap:0.4rem;margin:0;">
-        <input type="checkbox" id="stick-chk" role="switch"> Stick
-      </label>
-      <button type="submit">Save</button>
-      <span id="rename-status" style="font-size:0.85rem;color:var(--pico-muted-color);"></span>
-    </form>
-    ${pageNav()}
-    <div class="face-grid">
-      ${data.faces.map(f => `
-        <div class="face-cell">
-          <a href="#/photos/${f.md5}" class="face-nav-link" title="${escHtml(f.photo_path)} (score ${f.score.toFixed(2)})">
-            <img src="${f.img_url}" loading="lazy" alt="">
-          </a>
-          <a href="#/similar/${f.md5}/${bboxToPathParam(f.bbox)}" class="similar-link-btn" title="Find similar faces">≈</a>
-        </div>
-      `).join("")}
-    </div>
-    ${pageNav()}
-    ${clusterizePanelHtml()}
-  `;
-
-  app.innerHTML = html;
-
-  document.getElementById("rename-form").addEventListener("submit", async e => {
-    e.preventDefault();
-    const nameVal = document.getElementById("cluster-name-input").value.trim();
-    const stick = document.getElementById("stick-chk").checked;
-    const status = document.getElementById("rename-status");
-    status.textContent = "Saving…";
-    try {
-      const resp = await apiPatch(`/api/clusters/${id}`, { name: nameVal, stick });
-      status.textContent = `Saved — ${resp.faces_updated} faces updated`;
-    } catch (err) {
-      status.textContent = `Error: ${err.message}`;
-    }
-  });
-
-  attachClusterizePanel(app);
-}
-
-// ---------------------------------------------------------------------------
-// Clusterize panel (shared HTML + wiring)
-// ---------------------------------------------------------------------------
-function clusterizePanelHtml() {
-  return `
-    <div class="clusterize-panel">
-      <h3>Run clusterize</h3>
-      <label style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;">
-        <input type="checkbox" id="clusterize-reset" role="switch"> Reset existing clusters
-      </label>
-      <button id="clusterize-btn">Run clusterize</button>
-      <span id="clusterize-status" style="margin-left:0.75rem;font-size:0.85rem;color:var(--pico-muted-color);"></span>
-    </div>`;
-}
-
-function attachClusterizePanel(app) {
-  document.getElementById("clusterize-btn").addEventListener("click", async () => {
-    const reset = document.getElementById("clusterize-reset").checked;
-    const btn = document.getElementById("clusterize-btn");
-    const status = document.getElementById("clusterize-status");
-    btn.disabled = true;
-    status.textContent = "Running…";
-    try {
-      const resp = await apiPost("/api/clusterize", { reset });
-      status.textContent = `Done — ${resp.clusters_created} clusters created`;
-      btn.disabled = false;
-    } catch (err) {
-      btn.disabled = false;
-      if (err.message.includes("409")) {
-        status.textContent = "Clusters already exist — enable Reset to overwrite.";
-      } else {
-        status.textContent = `Error: ${err.message}`;
-      }
-    }
-  });
-}
 
 // ---------------------------------------------------------------------------
 // View: Photos (paginated)
@@ -613,12 +441,9 @@ async function renderPhotoDetail(md5) {
   if (data.faces.length > 0) {
     html += `<h3 style="margin-top:1.5rem;">Faces</h3><div class="face-grid">`;
     data.faces.forEach(f => {
-      const link = f.cluster_id != null ? `#/clusters/${f.cluster_id}` : "#/clusters";
       html += `
         <div class="face-cell">
-          <a href="${link}" class="face-nav-link" title="${escHtml(f.sticky_name || "")}">
-            <img src="${f.img_url}" loading="lazy">
-          </a>
+          <img src="${f.img_url}" loading="lazy" title="${escHtml(f.sticky_name || "")}">
           <a href="#/similar/${f.md5}/${bboxToPathParam(f.bbox)}" class="similar-link-btn" title="Find similar faces">≈</a>
         </div>`;
     });

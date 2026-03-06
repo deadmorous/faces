@@ -82,7 +82,7 @@
   opacity: 1;
 }
 
-/* Wrapping <a> inside a face-cell (cluster/photo detail) */
+/* Wrapping <a> inside a face-cell (photo detail) */
 .face-nav-link {
   display: block;
   line-height: 0;
@@ -110,50 +110,6 @@
   box-shadow: none;
 }
 
-/* Cluster grid */
-.cluster-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 1rem;
-  margin: 1rem 0;
-}
-
-.cluster-card {
-  border: 1px solid var(--pico-muted-border-color);
-  border-radius: 8px;
-  padding: 0.75rem;
-  cursor: pointer;
-  transition: box-shadow 0.15s;
-}
-
-.cluster-card:hover {
-  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-}
-
-.cluster-card .sample-faces {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 0.5rem;
-  flex-wrap: wrap;
-}
-
-.cluster-card .sample-faces img {
-  width: 48px;
-  height: 48px;
-  object-fit: cover;
-  border-radius: 4px;
-}
-
-.cluster-card .cluster-name {
-  font-weight: bold;
-  margin: 0;
-}
-
-.cluster-card .cluster-size {
-  font-size: 0.8rem;
-  color: var(--pico-color);
-  opacity: 0.7;
-}
 
 /* Photo list */
 .photo-list {
@@ -324,17 +280,6 @@
   color: var(--pico-muted-color);
 }
 
-/* Clusterize panel */
-.clusterize-panel {
-  border: 1px solid var(--pico-muted-border-color);
-  border-radius: 8px;
-  padding: 1rem;
-  margin-top: 2rem;
-}
-
-.clusterize-panel h3 {
-  margin-top: 0;
-}
 
 /* Misc */
 .badge {

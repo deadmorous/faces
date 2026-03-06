@@ -1,14 +1,13 @@
 """Shared algorithmic functions for classify and clusterize, reused by CLI and web."""
 
 import math
-from collections import Counter, defaultdict
+from collections import defaultdict
 
 import numpy as np
 
 from .db import (
     SPECIAL_LABELS, Database,
     load_all_embeddings, load_photo_dates, parse_date,
-    reset_clusters, store_clusters,
 )
 
 
@@ -155,79 +154,3 @@ def classify_candidates(
     return {"eps": eps, "groups": groups, "unmatched": unmatched}
 
 
-def run_clusterize(db: Database, threshold: float, reset: bool) -> dict:
-    """Run agglomerative clustering and store results.
-
-    Returns:
-      {
-        "clusters_created": int,
-        "auto_named": int,
-        "must_link_pairs": int,
-        "cannot_link_pairs": int,
-      }
-
-    Raises ValueError("clusters_exist") if clusters exist and reset is False.
-    """
-    from sklearn.cluster import AgglomerativeClustering
-    from sklearn.metrics import pairwise_distances
-
-    eps = math.sqrt(2.0 * (1.0 - threshold))
-
-    existing = db.clusters.count_rows()
-    if existing > 0 and not reset:
-        raise ValueError("clusters_exist")
-
-    if reset and existing > 0:
-        reset_clusters(db)
-
-    rows, X = load_all_embeddings(db)
-    if len(rows) == 0:
-        return {
-            "clusters_created": 0,
-            "auto_named": 0,
-            "must_link_pairs": 0,
-            "cannot_link_pairs": 0,
-        }
-
-    names = [row["name"] for row in rows]
-    real_names = [n if (n and n not in SPECIAL_LABELS) else None for n in names]
-
-    must_link = 0
-    cannot_link = 0
-    if any(real_names):
-        D = pairwise_distances(X, metric="euclidean")
-        for i in range(len(rows)):
-            if not real_names[i]:
-                continue
-            for j in range(i + 1, len(rows)):
-                if not real_names[j]:
-                    continue
-                if real_names[i] == real_names[j]:
-                    D[i, j] = D[j, i] = 0.0
-                    must_link += 1
-                else:
-                    D[i, j] = D[j, i] = 2.0
-                    cannot_link += 1
-        labels = AgglomerativeClustering(
-            n_clusters=None,
-            distance_threshold=eps,
-            metric="precomputed",
-            linkage="complete",
-        ).fit_predict(D)
-    else:
-        labels = AgglomerativeClustering(
-            n_clusters=None,
-            distance_threshold=eps,
-            metric="euclidean",
-            linkage="complete",
-        ).fit_predict(X)
-
-    auto_named = store_clusters(db, rows, labels)
-    n_clusters = len(Counter(labels))
-
-    return {
-        "clusters_created": n_clusters,
-        "auto_named": auto_named,
-        "must_link_pairs": must_link,
-        "cannot_link_pairs": cannot_link,
-    }
