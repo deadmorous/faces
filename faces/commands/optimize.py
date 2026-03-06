@@ -25,8 +25,7 @@ def optimize(cfg: Config, index: bool) -> None:
     """
     db = open_db(cfg.database)
 
-    for name, table in [("photos", db.photos), ("faces", db.faces),
-                        ("clusters", db.clusters)]:
+    for name, table in [("photos", db.photos), ("faces", db.faces)]:
         before = table.stats()
         nf_before = before.get("fragment_stats", {}).get("num_fragments", "?")
         click.echo(f"{name}: {table.count_rows()} rows, {nf_before} fragments — optimizing…",
