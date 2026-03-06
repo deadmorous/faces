@@ -14,7 +14,15 @@ from ..config import Config
               help="Auto-reload on code changes (development mode).")
 @click.pass_obj
 def serve(cfg: Config, port: int, host: str, reload: bool) -> None:
-    """Start the web UI and API server."""
+    """Start the web UI and API server.
+
+    The server loads its configuration via the same file search as the CLI
+    (--config / FACES_CONFIG env var / default paths).  To point it at a
+    specific config file set the environment variable before running:
+
+    \b
+        FACES_CONFIG=~/work/faces.yaml faces serve
+    """
     import uvicorn
 
     uvicorn.run(
