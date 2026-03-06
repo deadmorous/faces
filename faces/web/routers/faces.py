@@ -20,11 +20,11 @@ def label_face(
 ):
     """Set (or clear) the sticky label for a single face.
 
-    *bbox* is dash-separated: ``x1-y1-x2-y2``.
+    *bbox* is underscore-separated: ``x1_y1_x2_y2``.
     Set ``name`` to ``null`` to clear an existing label.
     """
     try:
-        parts = [int(v) for v in bbox.split("-")]
+        parts = [int(v) for v in bbox.split("_")]
         if len(parts) != 4:
             raise ValueError
         bbox_list = parts

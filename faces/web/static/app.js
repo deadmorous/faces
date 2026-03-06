@@ -50,7 +50,7 @@ function bboxToQuery(bbox) {
 }
 
 function bboxToPathParam(bbox) {
-  return bbox.join("-");
+  return bbox.join("_");
 }
 
 function showSpinner() {
@@ -690,7 +690,7 @@ async function renderPersonFaces(name, page = 1) {
 // ---------------------------------------------------------------------------
 async function renderSimilar(md5, bboxParam, unlabeledOnly = false, maxDist = null) {
   showSpinner();
-  const bboxQuery = bboxParam.replace(/-/g, ",");
+  const bboxQuery = bboxParam.replace(/_/g, ",");
   let data, people;
   try {
     [data, people] = await Promise.all([
@@ -827,7 +827,7 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = false, maxDist = nu
       .map(f => ({ md5: f.md5, bbox: f.bbox, name: label }));
 
     if (data.seed.name !== label) {
-      const seedBbox = bboxParam.split("-").map(Number);
+      const seedBbox = bboxParam.split("_").map(Number);
       items.push({ md5: data.seed.md5, bbox: seedBbox, name: label });
     }
 
@@ -856,7 +856,7 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = false, maxDist = nu
       .filter(f => selected.has(`${f.md5}:${bboxToQuery(f.bbox)}`))
       .map(f => ({ md5: f.md5, bbox: f.bbox, name }));
     if (data.seed.name !== name) {
-      const seedBbox = bboxParam.split("-").map(Number);
+      const seedBbox = bboxParam.split("_").map(Number);
       items.push({ md5: data.seed.md5, bbox: seedBbox, name });
     }
 
