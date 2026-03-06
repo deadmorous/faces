@@ -91,8 +91,10 @@ function route() {
       if (parts[1] && parts[2] === "faces") {
         const pg = parts[3] === "page" ? parseInt(parts[4], 10) || 1 : 1;
         renderPersonFaces(decodeURIComponent(parts[1]), pg);
+      } else if (parts[1] && parts[2] === "page") {
+        renderPersonDetail(decodeURIComponent(parts[1]), parseInt(parts[3], 10) || 1);
       } else if (parts[1]) {
-        renderPersonDetail(decodeURIComponent(parts[1]));
+        renderPersonDetail(decodeURIComponent(parts[1]), 1);
       } else {
         renderPeople();
       }
@@ -532,20 +534,34 @@ async function renderPeople() {
 // ---------------------------------------------------------------------------
 // View: Person Detail
 // ---------------------------------------------------------------------------
-async function renderPersonDetail(name) {
+async function renderPersonDetail(name, page = 1) {
   showSpinner();
   let data;
   try {
-    data = await apiFetch(`/api/people/${encodeURIComponent(name)}`);
+    data = await apiFetch(`/api/people/${encodeURIComponent(name)}?page=${page}&page_size=50`);
   } catch (e) {
     showError(e.message);
     return;
   }
 
   const app = document.getElementById("app");
+  const totalPages = Math.ceil(data.total / data.page_size);
+  const base = `#/people/${encodeURIComponent(name)}`;
+
+  function pageNav() {
+    if (totalPages <= 1) return "";
+    let nav = `<nav class="pagination">`;
+    if (page > 1) nav += `<a href="${base}/page/${page - 1}">← Prev</a>`;
+    nav += `<span>Page ${page} / ${totalPages}</span>`;
+    if (page < totalPages) nav += `<a href="${base}/page/${page + 1}">Next →</a>`;
+    nav += `</nav>`;
+    return nav;
+  }
+
   let html = `
     <p class="breadcrumb"><a href="#/people">← People</a></p>
-    <h2>${escHtml(data.name)}</h2>
+    <h2>${escHtml(data.name)} <span class="badge">${data.total} photo${data.total !== 1 ? "s" : ""}</span></h2>
+    ${pageNav()}
     <ul class="photo-list">`;
   data.photos.forEach(p => {
     html += `
@@ -557,7 +573,7 @@ async function renderPersonDetail(name) {
         </div>
       </li>`;
   });
-  html += `</ul>`;
+  html += `</ul>${pageNav()}`;
   app.innerHTML = html;
 
   app.querySelectorAll(".photo-list-item").forEach(li => {

@@ -39,6 +39,8 @@ def list_people(
 @router.get("/{name}", response_model=PersonDetail, summary="All photos containing a person")
 def get_person(
     name: str,
+    page: int = 1,
+    page_size: int = 50,
     since: Optional[str] = None,
     until: Optional[str] = None,
     absolute: bool = False,
@@ -86,7 +88,7 @@ def get_person(
             filtered.add(md5)
         md5s = filtered
 
-    photos = []
+    all_photos = []
     for md5 in sorted(md5s):
         photo_rows = (
             db.photos.search()
@@ -97,17 +99,25 @@ def get_person(
         if not photo_rows:
             continue
         pr = photo_rows[0]
-        rel = pr["path"]
-        photos.append(PersonPhoto(
+        all_photos.append(PersonPhoto(
             md5=md5,
-            path=rel,
+            path=pr["path"],
             exif_date=pr.get("exif_date"),
             photo_url=f"/img/photo/{md5}",
             photo_detail_url=f"/api/photos/{md5}",
             face_bboxes=md5_bboxes[md5],
         ))
 
-    return PersonDetail(name=name, photos=photos)
+    all_photos.sort(key=lambda p: p.exif_date or 0, reverse=True)
+    total = len(all_photos)
+    start = (page - 1) * page_size
+    return PersonDetail(
+        name=name,
+        total=total,
+        page=page,
+        page_size=page_size,
+        photos=all_photos[start:start + page_size],
+    )
 
 
 @router.get("/{name}/faces", response_model=PersonFacesPage, summary="Paginated face thumbnails for a person")

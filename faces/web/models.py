@@ -41,6 +41,9 @@ class PersonPhoto(BaseModel):
 
 class PersonDetail(BaseModel):
     name: str
+    total: int
+    page: int
+    page_size: int
     photos: list[PersonPhoto]
 
 
