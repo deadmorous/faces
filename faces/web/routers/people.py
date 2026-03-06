@@ -6,7 +6,7 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException
 
 from ..deps import get_cfg, get_db
-from ..models import Person, PersonDetail, PersonPhoto
+from ..models import Person, PersonDetail, PersonFaceItem, PersonFacesPage, PersonPhoto
 from ...config import Config
 from ...db import Database, load_photo_dates, parse_date
 
@@ -18,7 +18,7 @@ def list_people(
     db: Annotated[Database, Depends(get_db)] = ...,
 ):
     """List every distinct sticky name with face and photo counts."""
-    rows = db.clusters.search().limit(10_000_000).to_list()
+    rows = db.faces.search().limit(10_000_000).to_list()
 
     face_counts: dict[str, int] = defaultdict(int)
     photo_sets: dict[str, set] = defaultdict(set)
@@ -56,7 +56,7 @@ def get_person(
         raise HTTPException(status_code=422, detail=str(e))
 
     cluster_rows = (
-        db.clusters.search()
+        db.faces.search()
         .where(f"name = '{name}'", prefilter=True)
         .limit(10_000_000)
         .to_list()
@@ -108,3 +108,51 @@ def get_person(
         ))
 
     return PersonDetail(name=name, photos=photos)
+
+
+@router.get("/{name}/faces", response_model=PersonFacesPage, summary="Paginated face thumbnails for a person")
+def list_person_faces(
+    name: str,
+    page: int = 1,
+    page_size: int = 200,
+    db: Annotated[Database, Depends(get_db)] = ...,
+):
+    """Return all individual face crops labeled with this name, paginated."""
+    rows = (
+        db.faces.search()
+        .where(f"name = '{name}'", prefilter=True)
+        .limit(10_000_000)
+        .to_list()
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"Person {name!r} not found")
+
+    total = len(rows)
+    start = (page - 1) * page_size
+    page_rows = rows[start:start + page_size]
+
+    path_cache: dict[str, str] = {}
+
+    def _photo_path(md5: str) -> str:
+        if md5 not in path_cache:
+            photo_rows = (
+                db.photos.search()
+                .where(f"md5 = '{md5}'", prefilter=True)
+                .limit(1)
+                .to_list()
+            )
+            path_cache[md5] = photo_rows[0]["path"] if photo_rows else ""
+        return path_cache[md5]
+
+    faces = []
+    for row in page_rows:
+        bbox = list(row["bbox"])
+        x1, y1, x2, y2 = bbox
+        faces.append(PersonFaceItem(
+            md5=row["md5"],
+            bbox=bbox,
+            img_url=f"/img/face?md5={row['md5']}&bbox={x1},{y1},{x2},{y2}",
+            photo_path=_photo_path(row["md5"]),
+        ))
+
+    return PersonFacesPage(name=name, total=total, page=page, page_size=page_size, faces=faces)

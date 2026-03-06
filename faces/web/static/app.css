@@ -365,6 +365,12 @@
   color: var(--pico-muted-color);
 }
 
+.manage-link {
+  font-size: 0.8rem;
+  margin-left: 0.75rem;
+  color: var(--pico-muted-color);
+}
+
 /* Similar faces view */
 .similar-seed {
   display: flex;
@@ -379,6 +385,18 @@
   object-fit: cover;
   border-radius: 6px;
   flex-shrink: 0;
+}
+
+.action-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+
+.action-row button {
+  margin: 0;
 }
 
 .similar-label-row {

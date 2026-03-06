@@ -80,6 +80,21 @@ class PersonDetail(BaseModel):
     photos: list[PersonPhoto]
 
 
+class PersonFaceItem(BaseModel):
+    md5: str
+    bbox: list[int]
+    img_url: str
+    photo_path: str
+
+
+class PersonFacesPage(BaseModel):
+    name: str
+    total: int
+    page: int
+    page_size: int
+    faces: list[PersonFaceItem]
+
+
 # --- Photos ---
 
 class PhotoSummary(BaseModel):

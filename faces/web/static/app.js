@@ -94,8 +94,14 @@ function route() {
       else renderPhotos(1);
       break;
     case "people":
-      if (parts[1]) renderPersonDetail(decodeURIComponent(parts[1]));
-      else renderPeople();
+      if (parts[1] && parts[2] === "faces") {
+        const pg = parts[3] === "page" ? parseInt(parts[4], 10) || 1 : 1;
+        renderPersonFaces(decodeURIComponent(parts[1]), pg);
+      } else if (parts[1]) {
+        renderPersonDetail(decodeURIComponent(parts[1]));
+      } else {
+        renderPeople();
+      }
       break;
     case "similar":
       renderSimilar(parts[1], parts[2]);
@@ -117,7 +123,8 @@ async function renderClassify(page = 1, threshold = null) {
   showSpinner();
   let data, people;
   try {
-    const threshParam = threshold !== null ? `&threshold=${threshold}` : "";
+    // effectiveThreshold is the Euclidean eps; API expects cosine threshold = 1 - eps²/2
+    const threshParam = threshold !== null ? `&threshold=${1 - threshold * threshold / 2}` : "";
     [data, people] = await Promise.all([
       apiFetch(`/api/classify/candidates?min_size=3&page=${page}&page_size=${CLASSIFY_PAGE_SIZE}${threshParam}`),
       apiFetch("/api/people"),
@@ -222,7 +229,12 @@ async function renderClassify(page = 1, threshold = null) {
     html += `</nav>`;
   }
 
-  html += `<button id="submit-labels" style="margin-top:1rem;">Submit labels</button>`;
+  html += `
+    <div class="action-row">
+      <button id="submit-labels">Submit labels</button>
+      <button id="mark-nonface" class="secondary outline">Not a face</button>
+      <button id="mark-foreign"  class="secondary outline">Foreign</button>
+    </div>`;
   app.innerHTML = html;
 
   // Threshold slider
@@ -298,6 +310,32 @@ async function renderClassify(page = 1, threshold = null) {
       unmatched[ui].label = sel.value;
     });
   });
+
+  // Special-label buttons (classify view)
+  async function applySpecialLabelClassify(name) {
+    const items = [];
+    groups.forEach(g => {
+      g.faces.forEach(f => {
+        const key = `${f.md5}:${bboxToQuery(f.bbox)}`;
+        if (!g.deselected.has(key)) items.push({ md5: f.md5, bbox: f.bbox, name });
+      });
+    });
+    if (items.length === 0) { alert("Select at least one face first."); return; }
+    const btnNF = document.getElementById("mark-nonface");
+    const btnFR = document.getElementById("mark-foreign");
+    btnNF.disabled = true;
+    btnFR.disabled = true;
+    try {
+      await apiPost("/api/classify/labels", items);
+      setTimeout(() => renderClassify(page, effectiveThreshold), 1500);
+    } catch (e) {
+      btnNF.disabled = false;
+      btnFR.disabled = false;
+      showError(e.message);
+    }
+  }
+  document.getElementById("mark-nonface").addEventListener("click", () => applySpecialLabelClassify("__nonface__"));
+  document.getElementById("mark-foreign" ).addEventListener("click", () => applySpecialLabelClassify("__foreign__"));
 
   // Submit
   document.getElementById("submit-labels").addEventListener("click", async () => {
@@ -659,6 +697,7 @@ async function renderPeople() {
       <li>
         <a href="#/people/${encodeURIComponent(p.name)}">${escHtml(p.name)}</a>
         <span class="person-meta"> — ${p.face_count} face${p.face_count !== 1 ? "s" : ""}, ${p.photo_count} photo${p.photo_count !== 1 ? "s" : ""}</span>
+        <a href="#/people/${encodeURIComponent(p.name)}/faces" class="manage-link">manage</a>
       </li>`;
   });
   html += `</ul>`;
@@ -699,6 +738,125 @@ async function renderPersonDetail(name) {
   app.querySelectorAll(".photo-list-item").forEach(li => {
     li.addEventListener("click", () => { location.hash = `#/photos/${li.dataset.md5}`; });
   });
+}
+
+// ---------------------------------------------------------------------------
+// View: Person Faces (label management)
+// ---------------------------------------------------------------------------
+const PERSON_FACES_PAGE_SIZE = 200;
+
+async function renderPersonFaces(name, page = 1) {
+  showSpinner();
+  let data;
+  try {
+    data = await apiFetch(`/api/people/${encodeURIComponent(name)}/faces?page=${page}&page_size=${PERSON_FACES_PAGE_SIZE}`);
+  } catch (e) {
+    showError(e.message);
+    return;
+  }
+
+  const selected = new Set(data.faces.map(f => `${f.md5}:${bboxToQuery(f.bbox)}`));
+  const totalPages = Math.ceil(data.total / PERSON_FACES_PAGE_SIZE);
+  const app = document.getElementById("app");
+
+  function pageNav() {
+    if (totalPages <= 1) return "";
+    const base = `#/people/${encodeURIComponent(name)}/faces`;
+    let nav = `<nav class="pagination">`;
+    if (page > 1) nav += `<a href="${base}/page/${page - 1}">← Prev</a>`;
+    nav += `<span>Page ${page} / ${totalPages}</span>`;
+    if (page < totalPages) nav += `<a href="${base}/page/${page + 1}">Next →</a>`;
+    nav += `</nav>`;
+    return nav;
+  }
+
+  let html = `
+    <p class="breadcrumb"><a href="#/people">← People</a></p>
+    <h2>${escHtml(name)} <span class="badge">${data.total} faces</span></h2>
+    <div style="display:flex;align-items:center;gap:0.75rem;margin:0.5rem 0;">
+      <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;margin:0;">
+        <input type="checkbox" id="select-all-pf" checked> Select all
+      </label>
+    </div>
+    ${pageNav()}
+    <div class="face-grid">
+      ${data.faces.map((f, fi) => `
+        <div class="face-cell">
+          <img src="${f.img_url}" data-fi="${fi}" class="selected" loading="lazy"
+               title="${escHtml(f.photo_path)}">
+          <a href="#/photos/${f.md5}" target="_blank" class="face-link-btn" title="Open photo">↗</a>
+          <a href="#/similar/${f.md5}/${bboxToPathParam(f.bbox)}" class="similar-link-btn" title="Find similar">≈</a>
+        </div>
+      `).join("")}
+    </div>
+    ${pageNav()}
+    <div class="action-row">
+      <button id="pf-clear">Clear label</button>
+      <button id="pf-nonface" class="secondary outline">Not a face</button>
+      <button id="pf-foreign"  class="secondary outline">Foreign</button>
+    </div>`;
+
+  app.innerHTML = html;
+
+  function _updateSelectAll() {
+    const cb = document.getElementById("select-all-pf");
+    if (!cb) return;
+    if (selected.size === 0) { cb.checked = false; cb.indeterminate = false; }
+    else if (selected.size === data.faces.length) { cb.checked = true; cb.indeterminate = false; }
+    else { cb.checked = false; cb.indeterminate = true; }
+  }
+
+  document.getElementById("select-all-pf").addEventListener("change", e => {
+    const imgs = app.querySelectorAll(".face-grid img");
+    if (e.target.checked) {
+      data.faces.forEach(f => selected.add(`${f.md5}:${bboxToQuery(f.bbox)}`));
+      imgs.forEach(img => { img.className = "selected"; });
+    } else {
+      selected.clear();
+      imgs.forEach(img => { img.className = "deselected"; });
+    }
+  });
+
+  app.querySelectorAll(".face-grid img").forEach(img => {
+    img.addEventListener("click", () => {
+      const fi = parseInt(img.dataset.fi, 10);
+      const f = data.faces[fi];
+      const key = `${f.md5}:${bboxToQuery(f.bbox)}`;
+      if (selected.has(key)) {
+        selected.delete(key);
+        img.className = "deselected";
+      } else {
+        selected.add(key);
+        img.className = "selected";
+      }
+      _updateSelectAll();
+    });
+  });
+
+  async function applyLabel(labelName) {
+    const items = data.faces
+      .filter(f => selected.has(`${f.md5}:${bboxToQuery(f.bbox)}`))
+      .map(f => ({ md5: f.md5, bbox: f.bbox, name: labelName }));
+    if (items.length === 0) { alert("Select at least one face first."); return; }
+    ["pf-clear", "pf-nonface", "pf-foreign"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.disabled = true;
+    });
+    try {
+      await apiPost("/api/classify/labels", items);
+      setTimeout(() => renderPersonFaces(name, page), 1500);
+    } catch (e) {
+      ["pf-clear", "pf-nonface", "pf-foreign"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = false;
+      });
+      showError(e.message);
+    }
+  }
+
+  document.getElementById("pf-clear"  ).addEventListener("click", () => applyLabel(null));
+  document.getElementById("pf-nonface").addEventListener("click", () => applyLabel("__nonface__"));
+  document.getElementById("pf-foreign" ).addEventListener("click", () => applyLabel("__foreign__"));
 }
 
 // ---------------------------------------------------------------------------
@@ -766,6 +924,7 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = false, maxDist = nu
           <img src="${f.img_url}" data-fi="${fi}" class="selected" loading="lazy"
                title="${escHtml(f.photo_path)}${f.name ? " · " + escHtml(f.name) : ""} (dist ${f.dist.toFixed(3)})">
           <a href="#/photos/${f.md5}" target="_blank" class="face-link-btn" title="Open photo">↗</a>
+          <a href="#/similar/${f.md5}/${bboxToPathParam(f.bbox)}" class="similar-link-btn" title="Find similar faces">≈</a>
         </div>
       `).join("")}
     </div>
@@ -777,6 +936,8 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = false, maxDist = nu
         ${knownNames.map(n => `<option value="${escHtml(n)}">`).join("")}
       </datalist>
       <button id="similar-submit">Apply to selected</button>
+      <button id="mark-nonface" class="secondary outline">Not a face</button>
+      <button id="mark-foreign"  class="secondary outline">Foreign</button>
     </div>`;
 
   app.innerHTML = html;
@@ -840,6 +1001,11 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = false, maxDist = nu
       .filter(f => selected.has(`${f.md5}:${bboxToQuery(f.bbox)}`))
       .map(f => ({ md5: f.md5, bbox: f.bbox, name: label }));
 
+    if (data.seed.name !== label) {
+      const seedBbox = bboxParam.split("-").map(Number);
+      items.push({ md5: data.seed.md5, bbox: seedBbox, name: label });
+    }
+
     if (items.length === 0) {
       alert("Select at least one face first.");
       return;
@@ -858,6 +1024,33 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = false, maxDist = nu
       showError(e.message);
     }
   });
+
+  // Special-label buttons (similar view)
+  async function applySpecialLabelSimilar(name) {
+    const items = visibleFaces
+      .filter(f => selected.has(`${f.md5}:${bboxToQuery(f.bbox)}`))
+      .map(f => ({ md5: f.md5, bbox: f.bbox, name }));
+    if (data.seed.name !== name) {
+      const seedBbox = bboxParam.split("-").map(Number);
+      items.push({ md5: data.seed.md5, bbox: seedBbox, name });
+    }
+
+    if (items.length === 0) { alert("Select at least one face first."); return; }
+    const btnNF = document.getElementById("mark-nonface");
+    const btnFR = document.getElementById("mark-foreign");
+    btnNF.disabled = true;
+    btnFR.disabled = true;
+    try {
+      await apiPost("/api/classify/labels", items);
+      setTimeout(() => renderSimilar(md5, bboxParam, unlabeledOnly, effectiveMaxDist), 1500);
+    } catch (e) {
+      btnNF.disabled = false;
+      btnFR.disabled = false;
+      showError(e.message);
+    }
+  }
+  document.getElementById("mark-nonface").addEventListener("click", () => applySpecialLabelSimilar("__nonface__"));
+  document.getElementById("mark-foreign" ).addEventListener("click", () => applySpecialLabelSimilar("__foreign__"));
 }
 
 // ---------------------------------------------------------------------------
