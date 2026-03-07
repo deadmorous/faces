@@ -3,7 +3,7 @@
 from collections import defaultdict
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ..deps import get_cfg, get_db
 from ..models import Person, PersonDetail, PersonFaceItem, PersonFacesPage, PersonPhoto
@@ -13,27 +13,32 @@ from ...db import Database, load_photo_dates, parse_date
 router = APIRouter(prefix="/api/people", tags=["people"])
 
 
-@router.get("", response_model=list[Person], summary="List all named people")
-def list_people(
-    db: Annotated[Database, Depends(get_db)] = ...,
-):
-    """List every distinct sticky name with face and photo counts."""
-    rows = db.faces.search().limit(10_000_000).to_list()
+def build_people_cache(db: Database) -> list[Person]:
+    """Scan the faces table and return the sorted people list.
 
+    Called once at startup and again after any label change.
+    """
+    rows = db.faces.search().limit(10_000_000).to_list()
     face_counts: dict[str, int] = defaultdict(int)
     photo_sets: dict[str, set] = defaultdict(set)
-
     for row in rows:
         name = row.get("name")
         if name:
             face_counts[name] += 1
             photo_sets[name].add(row["md5"])
+    return sorted(
+        [
+            Person(name=name, face_count=face_counts[name], photo_count=len(photo_sets[name]))
+            for name in face_counts
+        ],
+        key=lambda p: p.name,
+    )
 
-    result = [
-        Person(name=name, face_count=face_counts[name], photo_count=len(photo_sets[name]))
-        for name in sorted(face_counts)
-    ]
-    return result
+
+@router.get("", response_model=list[Person], summary="List all named people")
+def list_people(request: Request):
+    """Return the cached people list (rebuilt after every label change)."""
+    return request.app.state.people_cache
 
 
 @router.get("/{name}", response_model=PersonDetail, summary="All photos containing a person")

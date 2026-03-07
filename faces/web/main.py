@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from ..config import load
 from ..db import open_db
 from .routers import classify, faces, images, people, photos
+from .routers.people import build_people_cache
 
 
 @asynccontextmanager
@@ -26,6 +27,7 @@ async def lifespan(app: FastAPI):
     db = open_db(cfg.database)
     app.state.cfg = cfg
     app.state.db = db
+    app.state.people_cache = build_people_cache(db)
     yield
 
 

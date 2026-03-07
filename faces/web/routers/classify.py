@@ -3,7 +3,7 @@
 from collections import defaultdict
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ..deps import get_cfg, get_db
 from ..models import (
@@ -13,6 +13,7 @@ from ..models import (
 from ...algo import classify_candidates
 from ...config import Config
 from ...db import Database
+from .people import build_people_cache
 
 router = APIRouter(prefix="/api/classify", tags=["classify"])
 
@@ -118,6 +119,7 @@ def get_candidates(
 @router.post("/labels", response_model=ClassifyLabelsResponse,
              summary="Bulk submit face labels")
 def submit_labels(
+    request: Request,
     items: list[FaceLabelItem],
     db: Annotated[Database, Depends(get_db)] = ...,
 ):
@@ -141,4 +143,5 @@ def submit_labels(
         where = " OR ".join(_face_condition(i) for i in group_items)
         db.faces.update(where=where, values={"name": name})
 
+    request.app.state.people_cache = build_people_cache(db)
     return ClassifyLabelsResponse(labeled=len(items))
