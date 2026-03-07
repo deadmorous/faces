@@ -36,6 +36,7 @@ def _photo_path_for_md5(db: Database, md5: str) -> str:
 @router.get("/candidates", response_model=ClassifyCandidates,
             summary="Get unlabeled faces grouped by predicted person")
 def get_candidates(
+    request: Request,
     threshold: Optional[float] = None,
     min_size: int = 3,
     page: int = 1,
@@ -49,19 +50,27 @@ def get_candidates(
 
     Groups are sorted by avg_dist ascending (most confident first).
     Unmatched faces (beyond eps) are included for foreign/non-face marking.
+    The full candidate list is cached in app.state keyed by (threshold, min_size,
+    since, until); page navigation is served from cache without recomputing.
     """
     effective_threshold = threshold if threshold is not None else cfg.cluster_threshold
+    cache_key = (effective_threshold, min_size, since, until)
+    cached = request.app.state.classify_cache
 
-    try:
-        result = classify_candidates(
-            db=db,
-            threshold=effective_threshold,
-            min_size=min_size,
-            since=since,
-            until=until,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+    if cached["key"] == cache_key and cached["result"] is not None:
+        result = cached["result"]
+    else:
+        try:
+            result = classify_candidates(
+                db=db,
+                threshold=effective_threshold,
+                min_size=min_size,
+                since=since,
+                until=until,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        request.app.state.classify_cache = {"key": cache_key, "result": result}
 
     # Enrich with URLs — build photo path cache to avoid repeated lookups
     path_cache: dict[str, str] = {}
@@ -144,4 +153,5 @@ def submit_labels(
         db.faces.update(where=where, values={"name": name})
 
     request.app.state.people_cache = build_people_cache(db)
+    request.app.state.classify_cache = {"key": None, "result": None}
     return ClassifyLabelsResponse(labeled=len(items))

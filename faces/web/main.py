@@ -28,6 +28,7 @@ async def lifespan(app: FastAPI):
     app.state.cfg = cfg
     app.state.db = db
     app.state.people_cache = build_people_cache(db)
+    app.state.classify_cache = {"key": None, "result": None}
     yield
 
 
