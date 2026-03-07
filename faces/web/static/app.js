@@ -53,6 +53,66 @@ function bboxToPathParam(bbox) {
   return bbox.join("_");
 }
 
+// Attach rubber-band rectangular selection to a face grid.
+// onRectSelect(imgElements) is called with all <img>s inside the drawn rectangle.
+// Returns a cleanup function (removes listeners, discards any in-progress rect).
+function attachRectSelect(gridEl, onRectSelect) {
+  let startX, startY, dragging = false, rectEl = null;
+
+  function onMouseDown(e) {
+    if (e.button !== 0 || e.target.closest("a")) return;
+    startX = e.clientX;
+    startY = e.clientY;
+    dragging = false;
+  }
+
+  function onMouseMove(e) {
+    if (startX === undefined) return;
+    const dx = e.clientX - startX, dy = e.clientY - startY;
+    if (!dragging && Math.hypot(dx, dy) < 6) return;
+    if (!dragging) {
+      dragging = true;
+      rectEl = document.createElement("div");
+      rectEl.className = "rect-select";
+      document.body.appendChild(rectEl);
+      document.body.style.userSelect = "none";
+    }
+    rectEl.style.left   = Math.min(startX, e.clientX) + "px";
+    rectEl.style.top    = Math.min(startY, e.clientY) + "px";
+    rectEl.style.width  = Math.abs(dx) + "px";
+    rectEl.style.height = Math.abs(dy) + "px";
+  }
+
+  function onMouseUp(e) {
+    if (startX === undefined) return;
+    startX = undefined;
+    if (!dragging) return;
+    dragging = false;
+    document.body.style.userSelect = "";
+    const sel = rectEl.getBoundingClientRect();
+    rectEl.remove(); rectEl = null;
+    // Suppress the click event that fires after mouseup on the same element.
+    document.addEventListener("click", e => e.stopPropagation(), { capture: true, once: true });
+    const hit = Array.from(gridEl.querySelectorAll("img")).filter(img => {
+      const r = img.getBoundingClientRect();
+      return r.left < sel.right && r.right > sel.left &&
+             r.top  < sel.bottom && r.bottom > sel.top;
+    });
+    if (hit.length) onRectSelect(hit);
+  }
+
+  gridEl.addEventListener("mousedown", onMouseDown);
+  document.addEventListener("mousemove", onMouseMove);
+  document.addEventListener("mouseup",   onMouseUp);
+  return function cleanup() {
+    gridEl.removeEventListener("mousedown", onMouseDown);
+    document.removeEventListener("mousemove", onMouseMove);
+    document.removeEventListener("mouseup",   onMouseUp);
+    if (rectEl) { rectEl.remove(); rectEl = null; }
+    document.body.style.userSelect = "";
+  };
+}
+
 function showSpinner() {
   document.getElementById("app").innerHTML =
     '<div aria-busy="true" style="text-align:center;padding:3rem;">Loading…</div>';
@@ -368,6 +428,24 @@ async function renderClassify(page = 1, threshold = null) {
       showError(e.message);
     }
   });
+
+  const rectCleanups = [];
+  app.querySelectorAll(".face-grid").forEach(grid => {
+    rectCleanups.push(attachRectSelect(grid, imgs => {
+      imgs.forEach(img => {
+        const gi = parseInt(img.dataset.group, 10);
+        const fi = parseInt(img.dataset.face,  10);
+        if (isNaN(gi) || isNaN(fi)) return;
+        const g = groups[gi];
+        const key = `${g.faces[fi].md5}:${bboxToQuery(g.faces[fi].bbox)}`;
+        g.deselected.delete(key);
+        img.className = "selected";
+      });
+      const gis = new Set(imgs.map(img => parseInt(img.dataset.group, 10)).filter(n => !isNaN(n)));
+      gis.forEach(gi => refreshGroupCheckbox(gi));
+    }));
+  });
+  _cleanup = () => rectCleanups.forEach(fn => fn());
 }
 
 
@@ -716,6 +794,17 @@ async function renderPersonFaces(name, page = 1) {
   document.getElementById("pf-nonface").addEventListener("click", () => applyLabel("__nonface__"));
   document.getElementById("pf-foreign" ).addEventListener("click", () => applyLabel("__foreign__"));
 
+  _cleanup = attachRectSelect(app.querySelector(".face-grid"), imgs => {
+    imgs.forEach(img => {
+      const fi = parseInt(img.dataset.fi, 10);
+      if (isNaN(fi)) return;
+      const f = data.faces[fi];
+      selected.add(`${f.md5}:${bboxToQuery(f.bbox)}`);
+      img.className = "selected";
+    });
+    _updateSelectAll();
+  });
+
   document.getElementById("pf-rename-btn").addEventListener("click", async () => {
     const newName = document.getElementById("pf-rename-input").value.trim() || null;
     const status = document.getElementById("pf-rename-status");
@@ -939,6 +1028,17 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = false, maxDist = nu
   }
   document.getElementById("mark-nonface").addEventListener("click", () => applySpecialLabelSimilar("__nonface__"));
   document.getElementById("mark-foreign" ).addEventListener("click", () => applySpecialLabelSimilar("__foreign__"));
+
+  _cleanup = attachRectSelect(app.querySelector(".face-grid"), imgs => {
+    imgs.forEach(img => {
+      const fi = parseInt(img.dataset.fi, 10);
+      if (isNaN(fi)) return;
+      const f = visibleFaces[fi];
+      selected.add(`${f.md5}:${bboxToQuery(f.bbox)}`);
+      img.className = "selected";
+    });
+    _updateSelectAllCheckbox();
+  });
 }
 
 // ---------------------------------------------------------------------------

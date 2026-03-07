@@ -316,6 +316,15 @@
   color: var(--pico-muted-color);
 }
 
+/* Rectangular selection overlay */
+.rect-select {
+  position: fixed;
+  border: 1.5px dashed var(--pico-primary);
+  background: rgba(74, 144, 217, 0.1);
+  pointer-events: none;
+  z-index: 9999;
+}
+
 /* Similar faces view */
 .similar-seed {
   display: flex;
