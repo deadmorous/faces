@@ -13,7 +13,8 @@ from ..models import (
 from ...algo import classify_candidates
 from ...config import Config
 from ...db import Database
-from .people import build_people_cache
+from ...timing import timed
+from .people import people_cache_to_list
 
 router = APIRouter(prefix="/api/classify", tags=["classify"])
 
@@ -60,14 +61,18 @@ def get_candidates(
     if cached["key"] == cache_key and cached["result"] is not None:
         result = cached["result"]
     else:
+        emb = request.app.state.embeddings_cache
         try:
-            result = classify_candidates(
-                db=db,
-                threshold=effective_threshold,
-                min_size=min_size,
-                since=since,
-                until=until,
-            )
+            with timed("GET /api/classify/candidates: classify_candidates (cache miss)"):
+                result = classify_candidates(
+                    db=db,
+                    threshold=effective_threshold,
+                    min_size=min_size,
+                    since=since,
+                    until=until,
+                    rows=emb["rows"],
+                    X=emb["X"],
+                )
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
         request.app.state.classify_cache = {"key": cache_key, "result": result}
@@ -152,6 +157,25 @@ def submit_labels(
         where = " OR ".join(_face_condition(i) for i in group_items)
         db.faces.update(where=where, values={"name": name})
 
-    request.app.state.people_cache = build_people_cache(db)
+    # Update people cache incrementally
+    people_cache = request.app.state.people_cache
+    for name, group_items in by_name.items():
+        if name is None:
+            continue  # faces were unlabeled before, still unlabeled — no entry to add
+        md5s = {item.md5 for item in group_items}
+        if name in people_cache:
+            people_cache[name]["face_count"] += len(group_items)
+            people_cache[name]["photo_md5s"] |= md5s
+        else:
+            people_cache[name] = {"face_count": len(group_items), "photo_md5s": md5s}
+
+    # Update embeddings cache: set new name on each affected row
+    emb_index = request.app.state.embeddings_cache["index"]
+    emb_rows = request.app.state.embeddings_cache["rows"]
+    for item in items:
+        key = (item.md5, tuple(item.bbox))
+        if key in emb_index:
+            emb_rows[emb_index[key]]["name"] = item.name
+
     request.app.state.classify_cache = {"key": None, "result": None}
     return ClassifyLabelsResponse(labeled=len(items))

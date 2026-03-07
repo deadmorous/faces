@@ -10,28 +10,36 @@ from ..models import (Person, PersonDetail, PersonFaceItem, PersonFacesPage,
                       PersonPhoto, PersonRenameRequest, PersonRenameResponse)
 from ...config import Config
 from ...db import Database, load_photo_dates, parse_date
+from ...timing import timed
 
 router = APIRouter(prefix="/api/people", tags=["people"])
 
 
-def build_people_cache(db: Database) -> list[Person]:
-    """Scan the faces table and return the sorted people list.
+PeopleCache = dict  # name → {"face_count": int, "photo_md5s": set[str]}
 
-    Called once at startup and again after any label change.
+
+def build_people_cache(db: Database) -> PeopleCache:
+    """Scan the faces table once and return a mutable cache dict.
+
+    Called once at startup; all subsequent updates are incremental.
     """
-    rows = db.faces.search().limit(10_000_000).to_list()
-    face_counts: dict[str, int] = defaultdict(int)
-    photo_sets: dict[str, set] = defaultdict(set)
+    with timed("build_people_cache: DB scan"):
+        rows = db.faces.search().limit(10_000_000).to_list()
+    cache: PeopleCache = {}
     for row in rows:
         name = row.get("name")
         if name:
-            face_counts[name] += 1
-            photo_sets[name].add(row["md5"])
+            if name not in cache:
+                cache[name] = {"face_count": 0, "photo_md5s": set()}
+            cache[name]["face_count"] += 1
+            cache[name]["photo_md5s"].add(row["md5"])
+    return cache
+
+
+def people_cache_to_list(cache: PeopleCache) -> list[Person]:
     return sorted(
-        [
-            Person(name=name, face_count=face_counts[name], photo_count=len(photo_sets[name]))
-            for name in face_counts
-        ],
+        [Person(name=n, face_count=e["face_count"], photo_count=len(e["photo_md5s"]))
+         for n, e in cache.items()],
         key=lambda p: p.name,
     )
 
@@ -39,7 +47,7 @@ def build_people_cache(db: Database) -> list[Person]:
 @router.get("", response_model=list[Person], summary="List all named people")
 def list_people(request: Request):
     """Return the cached people list (rebuilt after every label change)."""
-    return request.app.state.people_cache
+    return people_cache_to_list(request.app.state.people_cache)
 
 
 @router.get("/{name}", response_model=PersonDetail, summary="All photos containing a person")
@@ -63,12 +71,13 @@ def get_person(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    cluster_rows = (
-        db.faces.search()
-        .where(f"name = '{name}'", prefilter=True)
-        .limit(10_000_000)
-        .to_list()
-    )
+    with timed(f"GET /api/people/{name}: faces DB query"):
+        cluster_rows = (
+            db.faces.search()
+            .where(f"name = '{name}'", prefilter=True)
+            .limit(10_000_000)
+            .to_list()
+        )
     if not cluster_rows:
         raise HTTPException(status_code=404, detail=f"Person {name!r} not found")
 
@@ -95,24 +104,25 @@ def get_person(
         md5s = filtered
 
     all_photos = []
-    for md5 in sorted(md5s):
-        photo_rows = (
-            db.photos.search()
-            .where(f"md5 = '{md5}'", prefilter=True)
-            .limit(1)
-            .to_list()
-        )
-        if not photo_rows:
-            continue
-        pr = photo_rows[0]
-        all_photos.append(PersonPhoto(
-            md5=md5,
-            path=pr["path"],
-            exif_date=pr.get("exif_date"),
-            photo_url=f"/img/photo/{md5}",
-            photo_detail_url=f"/api/photos/{md5}",
-            face_bboxes=md5_bboxes[md5],
-        ))
+    with timed(f"GET /api/people/{name}: photos loop ({len(md5s)} photos)"):
+        for md5 in sorted(md5s):
+            photo_rows = (
+                db.photos.search()
+                .where(f"md5 = '{md5}'", prefilter=True)
+                .limit(1)
+                .to_list()
+            )
+            if not photo_rows:
+                continue
+            pr = photo_rows[0]
+            all_photos.append(PersonPhoto(
+                md5=md5,
+                path=pr["path"],
+                exif_date=pr.get("exif_date"),
+                photo_url=f"/img/photo/{md5}",
+                photo_detail_url=f"/api/photos/{md5}",
+                face_bboxes=md5_bboxes[md5],
+            ))
 
     all_photos.sort(key=lambda p: p.exif_date or 0, reverse=True)
     total = len(all_photos)
@@ -149,7 +159,25 @@ def rename_person(
         new_name = None
 
     db.faces.update(where=f"name = '{safe_name}'", values={"name": new_name})
-    request.app.state.people_cache = build_people_cache(db)
+
+    # Update people cache incrementally — no DB scan needed
+    cache = request.app.state.people_cache
+    old_entry = cache.pop(name, None)
+    if old_entry is not None and new_name is not None:
+        if new_name in cache:
+            cache[new_name]["face_count"] += old_entry["face_count"]
+            cache[new_name]["photo_md5s"] |= old_entry["photo_md5s"]
+        else:
+            cache[new_name] = old_entry
+
+    # Update embeddings cache: rename affected rows in-place (O(N) scan, ~1 ms)
+    for row in request.app.state.embeddings_cache["rows"]:
+        if row["name"] == name:
+            row["name"] = new_name
+
+    # Invalidate classify cache — labeled/unlabeled split has changed
+    request.app.state.classify_cache = {"key": None, "result": None}
+
     return PersonRenameResponse(updated=count, new_name=new_name)
 
 

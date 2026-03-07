@@ -10,6 +10,7 @@ import numpy as np
 import pyarrow as pa
 
 from .scanner import FaceDetection
+from .timing import timed
 
 # Sentinel labels that mark faces as irrelevant.  They are stored like normal
 # sticky labels so they survive re-scans and re-clusters, but commands treat
@@ -216,7 +217,8 @@ def load_photo_dates(db: Database) -> dict[str, float]:
     for photos that have no EXIF data or were scanned before exif_date was
     added.
     """
-    rows = db.photos.search().limit(10_000_000).to_list()
+    with timed("load_photo_dates: DB scan"):
+        rows = db.photos.search().limit(10_000_000).to_list()
     result: dict[str, float] = {}
     for r in rows:
         date = r.get("exif_date") or r.get("mtime")
@@ -227,12 +229,14 @@ def load_photo_dates(db: Database) -> dict[str, float]:
 
 def load_all_embeddings(db: Database) -> tuple[list[dict], np.ndarray]:
     """Return (rows, X) where rows has md5, bbox, name; X is shape (N, 512) float32."""
-    all_rows = db.faces.search().limit(10_000_000).to_list()
+    with timed("load_all_embeddings: DB scan"):
+        all_rows = db.faces.search().limit(10_000_000).to_list()
     if not all_rows:
         return [], np.empty((0, 512), dtype=np.float32)
-    rows = [{"md5": r["md5"], "bbox": r["bbox"], "name": r.get("name")}
-            for r in all_rows]
-    X = np.array([r["embedding"] for r in all_rows], dtype=np.float32)
+    with timed(f"load_all_embeddings: build numpy array ({len(all_rows)} faces)"):
+        rows = [{"md5": r["md5"], "bbox": r["bbox"], "name": r.get("name")}
+                for r in all_rows]
+        X = np.array([r["embedding"] for r in all_rows], dtype=np.float32)
     return rows, X
 
 

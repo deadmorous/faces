@@ -9,6 +9,7 @@ from .db import (
     SPECIAL_LABELS, Database,
     load_all_embeddings, load_photo_dates, parse_date,
 )
+from .timing import timed
 
 
 def classify_candidates(
@@ -17,6 +18,8 @@ def classify_candidates(
     min_size: int = 3,
     since: str | None = None,
     until: str | None = None,
+    rows: list[dict] | None = None,
+    X: np.ndarray | None = None,
 ) -> dict:
     """Run single-linkage classify logic and return grouped candidates.
 
@@ -44,7 +47,9 @@ def classify_candidates(
     except ValueError as e:
         raise ValueError(str(e))
 
-    rows, X = load_all_embeddings(db)
+    if rows is None or X is None:
+        with timed("classify_candidates: load_all_embeddings"):
+            rows, X = load_all_embeddings(db)
 
     photo_mtimes: dict[str, float] | None = None
     if since_ts is not None or until_ts is not None:
@@ -105,15 +110,19 @@ def classify_candidates(
     from scipy.spatial.distance import cdist
 
     unlabeled_X = X[unlabeled_indices]
-    D = cdist(unlabeled_X, labeled_X, metric="euclidean")
+    n_unlabeled = len(unlabeled_indices)
+    n_labeled = len(all_labeled_idx)
+    n_persons = len(person_names)
+    with timed(f"classify_candidates: cdist ({n_unlabeled} unlabeled × {n_labeled} labeled, {n_persons} persons)"):
+        D = cdist(unlabeled_X, labeled_X, metric="euclidean")
 
-    per_person = np.stack(
-        [D[:, person_col_map[name]].min(axis=1) for name in person_names],
-        axis=1,
-    )
+        per_person = np.stack(
+            [D[:, person_col_map[name]].min(axis=1) for name in person_names],
+            axis=1,
+        )
 
-    best_idx = per_person.argmin(axis=1)
-    best_dist = per_person[np.arange(len(unlabeled_indices)), best_idx]
+        best_idx = per_person.argmin(axis=1)
+        best_dist = per_person[np.arange(n_unlabeled), best_idx]
 
     candidate_mask = best_dist < eps
 

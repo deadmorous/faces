@@ -7,6 +7,7 @@ Set the FACES_CONFIG environment variable to point to a specific config file:
     FACES_CONFIG=~/work/faces.yaml uvicorn faces.web.main:app --reload
 """
 
+import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -16,9 +17,17 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..config import load
-from ..db import open_db
+from ..db import load_all_embeddings, open_db
 from .routers import classify, faces, images, people, photos
 from .routers.people import build_people_cache
+
+
+_perf_logger = logging.getLogger("faces.perf")
+_perf_logger.setLevel(logging.INFO)
+_perf_logger.propagate = False
+_perf_handler = logging.StreamHandler()
+_perf_handler.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
+_perf_logger.addHandler(_perf_handler)
 
 
 @asynccontextmanager
@@ -29,6 +38,9 @@ async def lifespan(app: FastAPI):
     app.state.db = db
     app.state.people_cache = build_people_cache(db)
     app.state.classify_cache = {"key": None, "result": None}
+    rows, X = load_all_embeddings(db)
+    index = {(r["md5"], tuple(r["bbox"])): i for i, r in enumerate(rows)}
+    app.state.embeddings_cache = {"rows": rows, "X": X, "index": index}
     yield
 
 
