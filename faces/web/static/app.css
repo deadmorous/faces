@@ -44,8 +44,11 @@
 .face-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
-  gap: 6px;
+  gap: 9px;
   margin: 0.5rem 0;
+  padding: 0.75rem;
+  background: var(--pico-card-background-color);
+  border-radius: 6px;
 }
 
 .face-cell {
@@ -319,10 +322,18 @@
 /* Rectangular selection overlay */
 .rect-select {
   position: fixed;
-  border: 1.5px dashed var(--pico-primary);
+  border: 1.5px dashed #4a90d9;
   background: rgba(74, 144, 217, 0.1);
   pointer-events: none;
   z-index: 9999;
+}
+.rect-select--deselect {
+  border-color: #d94a4a;
+  background: rgba(217, 74, 74, 0.1);
+}
+.rect-select--invert {
+  border-color: #d9a04a;
+  background: rgba(217, 160, 74, 0.1);
 }
 
 /* Similar faces view */

@@ -54,15 +54,17 @@ function bboxToPathParam(bbox) {
 }
 
 // Attach rubber-band rectangular selection to a face grid.
-// onRectSelect(imgElements) is called with all <img>s inside the drawn rectangle.
+// onRectSelect(imgElements, mode) is called with all <img>s inside the drawn
+// rectangle.  mode is "select" (default), "deselect" (Shift), or "invert" (Ctrl).
 // Returns a cleanup function (removes listeners, discards any in-progress rect).
 function attachRectSelect(gridEl, onRectSelect) {
-  let startX, startY, dragging = false, rectEl = null;
+  let startX, startY, startMode, dragging = false, rectEl = null;
 
   function onMouseDown(e) {
     if (e.button !== 0 || e.target.closest("a")) return;
     startX = e.clientX;
     startY = e.clientY;
+    startMode = e.shiftKey ? "deselect" : e.ctrlKey ? "invert" : "select";
     dragging = false;
   }
 
@@ -73,7 +75,7 @@ function attachRectSelect(gridEl, onRectSelect) {
     if (!dragging) {
       dragging = true;
       rectEl = document.createElement("div");
-      rectEl.className = "rect-select";
+      rectEl.className = "rect-select rect-select--" + startMode;
       document.body.appendChild(rectEl);
       document.body.style.userSelect = "none";
     }
@@ -98,7 +100,7 @@ function attachRectSelect(gridEl, onRectSelect) {
       return r.left < sel.right && r.right > sel.left &&
              r.top  < sel.bottom && r.bottom > sel.top;
     });
-    if (hit.length) onRectSelect(hit);
+    if (hit.length) onRectSelect(hit, startMode);
   }
 
   gridEl.addEventListener("mousedown", onMouseDown);
@@ -431,15 +433,21 @@ async function renderClassify(page = 1, threshold = null) {
 
   const rectCleanups = [];
   app.querySelectorAll(".face-grid").forEach(grid => {
-    rectCleanups.push(attachRectSelect(grid, imgs => {
+    rectCleanups.push(attachRectSelect(grid, (imgs, mode) => {
       imgs.forEach(img => {
         const gi = parseInt(img.dataset.group, 10);
         const fi = parseInt(img.dataset.face,  10);
         if (isNaN(gi) || isNaN(fi)) return;
         const g = groups[gi];
         const key = `${g.faces[fi].md5}:${bboxToQuery(g.faces[fi].bbox)}`;
-        g.deselected.delete(key);
-        img.className = "selected";
+        if (mode === "deselect") {
+          g.deselected.add(key);    img.className = "deselected";
+        } else if (mode === "invert") {
+          if (g.deselected.has(key)) { g.deselected.delete(key); img.className = "selected"; }
+          else                       { g.deselected.add(key);    img.className = "deselected"; }
+        } else {
+          g.deselected.delete(key); img.className = "selected";
+        }
       });
       const gis = new Set(imgs.map(img => parseInt(img.dataset.group, 10)).filter(n => !isNaN(n)));
       gis.forEach(gi => refreshGroupCheckbox(gi));
@@ -794,13 +802,20 @@ async function renderPersonFaces(name, page = 1) {
   document.getElementById("pf-nonface").addEventListener("click", () => applyLabel("__nonface__"));
   document.getElementById("pf-foreign" ).addEventListener("click", () => applyLabel("__foreign__"));
 
-  _cleanup = attachRectSelect(app.querySelector(".face-grid"), imgs => {
+  _cleanup = attachRectSelect(app.querySelector(".face-grid"), (imgs, mode) => {
     imgs.forEach(img => {
       const fi = parseInt(img.dataset.fi, 10);
       if (isNaN(fi)) return;
       const f = data.faces[fi];
-      selected.add(`${f.md5}:${bboxToQuery(f.bbox)}`);
-      img.className = "selected";
+      const key = `${f.md5}:${bboxToQuery(f.bbox)}`;
+      if (mode === "deselect") {
+        selected.delete(key); img.className = "deselected";
+      } else if (mode === "invert") {
+        if (selected.has(key)) { selected.delete(key); img.className = "deselected"; }
+        else                   { selected.add(key);    img.className = "selected"; }
+      } else {
+        selected.add(key); img.className = "selected";
+      }
     });
     _updateSelectAll();
   });
@@ -1029,13 +1044,20 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = false, maxDist = nu
   document.getElementById("mark-nonface").addEventListener("click", () => applySpecialLabelSimilar("__nonface__"));
   document.getElementById("mark-foreign" ).addEventListener("click", () => applySpecialLabelSimilar("__foreign__"));
 
-  _cleanup = attachRectSelect(app.querySelector(".face-grid"), imgs => {
+  _cleanup = attachRectSelect(app.querySelector(".face-grid"), (imgs, mode) => {
     imgs.forEach(img => {
       const fi = parseInt(img.dataset.fi, 10);
       if (isNaN(fi)) return;
       const f = visibleFaces[fi];
-      selected.add(`${f.md5}:${bboxToQuery(f.bbox)}`);
-      img.className = "selected";
+      const key = `${f.md5}:${bboxToQuery(f.bbox)}`;
+      if (mode === "deselect") {
+        selected.delete(key); img.className = "deselected";
+      } else if (mode === "invert") {
+        if (selected.has(key)) { selected.delete(key); img.className = "deselected"; }
+        else                   { selected.add(key);    img.className = "selected"; }
+      } else {
+        selected.add(key); img.className = "selected";
+      }
     });
     _updateSelectAllCheckbox();
   });
