@@ -62,6 +62,15 @@ class PersonFacesPage(BaseModel):
     faces: list[PersonFaceItem]
 
 
+class PersonRenameRequest(BaseModel):
+    new_name: Optional[str]
+
+
+class PersonRenameResponse(BaseModel):
+    updated: int
+    new_name: Optional[str]
+
+
 # --- Photos ---
 
 class PhotoSummary(BaseModel):

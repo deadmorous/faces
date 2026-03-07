@@ -588,13 +588,17 @@ const PERSON_FACES_PAGE_SIZE = 200;
 
 async function renderPersonFaces(name, page = 1) {
   showSpinner();
-  let data;
+  let data, people;
   try {
-    data = await apiFetch(`/api/people/${encodeURIComponent(name)}/faces?page=${page}&page_size=${PERSON_FACES_PAGE_SIZE}`);
+    [data, people] = await Promise.all([
+      apiFetch(`/api/people/${encodeURIComponent(name)}/faces?page=${page}&page_size=${PERSON_FACES_PAGE_SIZE}`),
+      apiFetch("/api/people"),
+    ]);
   } catch (e) {
     showError(e.message);
     return;
   }
+  const knownNames = people.map(p => p.name).filter(n => !SPECIAL_LABELS.includes(n));
 
   const selected = new Set(data.faces.map(f => `${f.md5}:${bboxToQuery(f.bbox)}`));
   const totalPages = Math.ceil(data.total / PERSON_FACES_PAGE_SIZE);
@@ -635,6 +639,19 @@ async function renderPersonFaces(name, page = 1) {
       <button id="pf-clear">Clear label</button>
       <button id="pf-nonface" class="secondary outline">Not a face</button>
       <button id="pf-foreign"  class="secondary outline">Foreign</button>
+    </div>
+    <div style="margin-top:1.5rem;border-top:1px solid var(--pico-muted-border-color);padding-top:1rem;">
+      <h3 style="margin-top:0;">Rename person</h3>
+      <div class="action-row">
+        <input type="text" id="pf-rename-input" list="pf-rename-datalist"
+               placeholder="New name — empty to remove label"
+               style="flex:1;min-width:200px;margin:0;">
+        <datalist id="pf-rename-datalist">
+          ${knownNames.filter(n => n !== name).map(n => `<option value="${escHtml(n)}">`).join("")}
+        </datalist>
+        <button id="pf-rename-btn">Rename</button>
+        <span id="pf-rename-status" style="font-size:0.85rem;color:var(--pico-muted-color);"></span>
+      </div>
     </div>`;
 
   app.innerHTML = html;
@@ -698,6 +715,36 @@ async function renderPersonFaces(name, page = 1) {
   document.getElementById("pf-clear"  ).addEventListener("click", () => applyLabel(null));
   document.getElementById("pf-nonface").addEventListener("click", () => applyLabel("__nonface__"));
   document.getElementById("pf-foreign" ).addEventListener("click", () => applyLabel("__foreign__"));
+
+  document.getElementById("pf-rename-btn").addEventListener("click", async () => {
+    const newName = document.getElementById("pf-rename-input").value.trim() || null;
+    const status = document.getElementById("pf-rename-status");
+
+    if (newName === name) return;
+
+    if (!newName) {
+      if (!confirm(`Remove label "${name}" from all ${data.total} face(s)? They will become unlabeled.`)) return;
+    } else if (knownNames.includes(newName)) {
+      const target = people.find(p => p.name === newName);
+      const targetCount = target ? target.face_count : "?";
+      if (!confirm(`"${newName}" already exists (${targetCount} face(s)). Merge "${name}" into "${newName}"?`)) return;
+    }
+
+    const btn = document.getElementById("pf-rename-btn");
+    btn.disabled = true;
+    status.textContent = "Renaming…";
+    try {
+      const resp = await apiPatch(`/api/people/${encodeURIComponent(name)}`, { new_name: newName });
+      if (newName) {
+        location.hash = `#/people/${encodeURIComponent(newName)}/faces`;
+      } else {
+        location.hash = `#/people`;
+      }
+    } catch (e) {
+      btn.disabled = false;
+      status.textContent = `Error: ${e.message}`;
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------

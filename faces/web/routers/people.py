@@ -6,7 +6,8 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ..deps import get_cfg, get_db
-from ..models import Person, PersonDetail, PersonFaceItem, PersonFacesPage, PersonPhoto
+from ..models import (Person, PersonDetail, PersonFaceItem, PersonFacesPage,
+                      PersonPhoto, PersonRenameRequest, PersonRenameResponse)
 from ...config import Config
 from ...db import Database, load_photo_dates, parse_date
 
@@ -123,6 +124,33 @@ def get_person(
         page_size=page_size,
         photos=all_photos[start:start + page_size],
     )
+
+
+@router.patch("/{name}", response_model=PersonRenameResponse, summary="Rename a person (relabels all their faces)")
+def rename_person(
+    name: str,
+    body: PersonRenameRequest,
+    request: Request,
+    db: Annotated[Database, Depends(get_db)] = ...,
+):
+    """Rename all faces labeled *name* to *new_name*.
+
+    Passing ``null`` or an empty string clears the label (faces become unlabeled).
+    Renaming to an existing name merges the two people — the caller is expected
+    to confirm this client-side before calling.
+    """
+    safe_name = name.replace("'", "''")
+    count = db.faces.count_rows(f"name = '{safe_name}'")
+    if count == 0:
+        raise HTTPException(status_code=404, detail=f"Person {name!r} not found")
+
+    new_name = body.new_name.strip() if body.new_name else None
+    if not new_name:
+        new_name = None
+
+    db.faces.update(where=f"name = '{safe_name}'", values={"name": new_name})
+    request.app.state.people_cache = build_people_cache(db)
+    return PersonRenameResponse(updated=count, new_name=new_name)
 
 
 @router.get("/{name}/faces", response_model=PersonFacesPage, summary="Paginated face thumbnails for a person")
