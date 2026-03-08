@@ -781,7 +781,7 @@ async function renderPersonFaces(name, page = 1) {
 // ---------------------------------------------------------------------------
 // View: Similar faces
 // ---------------------------------------------------------------------------
-async function renderSimilar(md5, bboxParam, unlabeledOnly = false, maxDist = null) {
+async function renderSimilar(md5, bboxParam, unlabeledOnly = true, maxDist = null) {
   showSpinner();
   const bboxQuery = bboxParam.replace(/_/g, ",");
   let data, people;
@@ -806,7 +806,7 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = false, maxDist = nu
   const effectiveMaxDist = maxDist !== null ? maxDist : maxResultDist;
   const visibleFaces = allFaces.filter(f => f.dist <= effectiveMaxDist);
 
-  const selected = new Set(visibleFaces.map(f => `${f.md5}:${bboxToQuery(f.bbox)}`));
+  const selected = new Set();
   const app = document.getElementById("app");
 
   const seedName = data.seed.name
@@ -832,14 +832,14 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = false, maxDist = nu
     </div>
     <div style="display:flex;align-items:center;gap:0.75rem;margin:0.5rem 0;">
       <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;margin:0;">
-        <input type="checkbox" id="select-all-similar" checked> Select all
+        <input type="checkbox" id="select-all-similar"> Select all
       </label>
       <span class="dist-tag">${visibleFaces.length} result${visibleFaces.length !== 1 ? "s" : ""}</span>
     </div>
     <div class="face-grid">
       ${visibleFaces.map((f, fi) => `
         <div class="face-cell">
-          <img src="${f.img_url}" data-fi="${fi}" class="selected" loading="lazy"
+          <img src="${f.img_url}" data-fi="${fi}" class="deselected" loading="lazy"
                title="${escHtml(f.photo_path)}${f.name ? " · " + escHtml(f.name) : ""} (dist ${f.dist.toFixed(3)})">
           <a href="#/photos/${f.md5}" target="_blank" class="face-link-btn" title="Open photo">↗</a>
           <a href="#/similar/${f.md5}/${bboxToPathParam(f.bbox)}" class="similar-link-btn" title="Find similar faces">≈</a>
