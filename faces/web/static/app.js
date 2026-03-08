@@ -176,10 +176,10 @@ window.addEventListener("DOMContentLoaded", route);
 // View: Classify
 // ---------------------------------------------------------------------------
 const CLASSIFY_PAGE_SIZE = 10;
-let _classifyAlgo = "min_dist";  // persists across page navigations
+let _classifyAlgo = localStorage.getItem("classifyAlgo") || "min_dist";
 
 async function renderClassify(page = 1, threshold = null, algo = null) {
-  if (algo !== null) _classifyAlgo = algo;
+  if (algo !== null) { _classifyAlgo = algo; localStorage.setItem("classifyAlgo", algo); }
   const currentAlgo = _classifyAlgo;
   showSpinner();
   let data, people, algorithms;
