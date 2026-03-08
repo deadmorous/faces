@@ -132,7 +132,7 @@ function route() {
   // Teardown current view
   if (_cleanup) { _cleanup(); _cleanup = null; }
 
-  const hash = location.hash || "#/classify";
+  const hash = location.hash || "#/unlabeled";
   const parts = hash.replace(/^#\//, "").split("/");
 
   // Update active nav link
@@ -141,6 +141,9 @@ function route() {
   });
 
   switch (parts[0]) {
+    case "unlabeled":
+      renderUnlabeled(parts[1] === "page" ? parseInt(parts[2], 10) || 1 : 1);
+      break;
     case "classify":
       renderClassify();
       break;
@@ -165,12 +168,57 @@ function route() {
       renderSimilar(parts[1], parts[2]);
       break;
     default:
-      renderClassify();
+      renderUnlabeled(1);
   }
 }
 
 window.addEventListener("hashchange", route);
 window.addEventListener("DOMContentLoaded", route);
+
+// ---------------------------------------------------------------------------
+// View: Unlabeled faces
+// ---------------------------------------------------------------------------
+async function renderUnlabeled(page = 1) {
+  showSpinner();
+  let data;
+  try {
+    data = await apiFetch(`/api/faces/unlabeled?page=${page}&page_size=100`);
+  } catch (e) { showError(e.message); return; }
+
+  const app = document.getElementById("app");
+  const totalPages = Math.ceil(data.total / 100);
+
+  let html = `<h2>Unlabeled faces <span class="badge">${data.total}</span></h2>`;
+
+  if (data.faces.length === 0) {
+    html += `<p>No unlabeled faces.</p>`;
+    app.innerHTML = html;
+    return;
+  }
+
+  html += `<div class="face-grid">`;
+  data.faces.forEach(f => {
+    const [x1, y1, x2, y2] = f.bbox;
+    html += `
+      <div class="face-cell">
+        <img src="${f.img_url}" loading="lazy" title="${f.md5}">
+        <a href="#/photos/${f.md5}" target="_blank" class="face-link-btn" title="Open photo">↗</a>
+        <a href="#/similar/${f.md5}/${bboxToPathParam(f.bbox)}" class="similar-link-btn" title="Find similar">≈</a>
+      </div>`;
+  });
+  html += `</div>`;
+
+  if (totalPages > 1) {
+    html += `<nav class="pagination">`;
+    if (page > 1) html += `<a href="#/unlabeled/page/${page - 1}">← Prev</a>`;
+    html += `<span>Page ${page} / ${totalPages}</span>`;
+    if (page < totalPages) html += `<a href="#/unlabeled/page/${page + 1}">Next →</a>`;
+    html += `</nav>`;
+  }
+
+  app.innerHTML = html;
+}
+
 
 // ---------------------------------------------------------------------------
 // View: Classify

@@ -2,13 +2,44 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from ..deps import get_db
 from ..models import FaceLabelRequest, SimilarFace, SimilarFacesResponse
 from ...db import Database, stick_face
 
 router = APIRouter(prefix="/api/faces", tags=["faces"])
+
+
+@router.get("/unlabeled", summary="Paginated unlabeled faces sorted by bbox perimeter")
+def list_unlabeled_faces(
+    request: Request,
+    page: int = 1,
+    page_size: int = 100,
+):
+    """Return unlabeled faces sorted by bounding-box perimeter descending (largest first).
+
+    Served entirely from the in-memory embeddings cache — no DB queries.
+    """
+    all_rows = request.app.state.embeddings_cache["rows"]
+    unlabeled = [r for r in all_rows if not r.get("name")]
+    unlabeled.sort(
+        key=lambda r: (r["bbox"][2] - r["bbox"][0]) + (r["bbox"][3] - r["bbox"][1]),
+        reverse=True,
+    )
+    total = len(unlabeled)
+    start = (page - 1) * page_size
+    page_rows = unlabeled[start:start + page_size]
+    faces = []
+    for r in page_rows:
+        x1, y1, x2, y2 = r["bbox"]
+        faces.append({
+            "md5": r["md5"],
+            "bbox": list(r["bbox"]),
+            "img_url": f"/img/face?md5={r['md5']}&bbox={x1},{y1},{x2},{y2}",
+            "photo_url": f"/img/photo/{r['md5']}",
+        })
+    return {"total": total, "page": page, "page_size": page_size, "faces": faces}
 
 
 @router.patch("/{md5}/{bbox}", status_code=204, summary="Set sticky label on a single face")
