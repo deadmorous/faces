@@ -16,6 +16,7 @@ def list_unlabeled_faces(
     request: Request,
     page: int = 1,
     page_size: int = 100,
+    rel_size_min: float = 0.0,
 ):
     """Return unlabeled faces sorted by bounding-box perimeter descending (largest first).
 
@@ -23,6 +24,8 @@ def list_unlabeled_faces(
     """
     all_rows = request.app.state.embeddings_cache["rows"]
     unlabeled = [r for r in all_rows if not r.get("name")]
+    if rel_size_min > 0.0:
+        unlabeled = [r for r in unlabeled if r.get("rel_size", 1.0) >= rel_size_min]
     unlabeled.sort(
         key=lambda r: (r["bbox"][2] - r["bbox"][0]) + (r["bbox"][3] - r["bbox"][1]),
         reverse=True,
@@ -36,6 +39,7 @@ def list_unlabeled_faces(
         faces.append({
             "md5": r["md5"],
             "bbox": list(r["bbox"]),
+            "rel_size": round(r.get("rel_size", 1.0), 3),
             "img_url": f"/img/face?md5={r['md5']}&bbox={x1},{y1},{x2},{y2}",
             "photo_url": f"/img/photo/{r['md5']}",
         })
@@ -96,6 +100,7 @@ def label_face(
 @router.get("/similar", response_model=SimilarFacesResponse,
             summary="Find faces with similar embeddings")
 def get_similar_faces(
+    request: Request,
     md5: str,
     bbox: str = Query(..., description="x1,y1,x2,y2 in original image pixels"),
     limit: int = 100,
@@ -128,6 +133,14 @@ def get_similar_faces(
         raise HTTPException(status_code=404, detail="Face not found")
     seed_embedding = seed_row["embedding"]
 
+    emb_index = request.app.state.embeddings_cache["index"]
+    emb_rows  = request.app.state.embeddings_cache["rows"]
+
+    def _rel_size(fmd5: str, fbbox: list) -> float:
+        key = (fmd5, tuple(fbbox))
+        idx = emb_index.get(key)
+        return emb_rows[idx].get("rel_size", 1.0) if idx is not None else 1.0
+
     # Photo path cache
     path_cache: dict[str, str] = {}
 
@@ -141,13 +154,15 @@ def get_similar_faces(
 
     def _make(r: dict) -> SimilarFace:
         bx1, by1, bx2, by2 = r["bbox"]
+        bbox_list = list(r["bbox"])
         return SimilarFace(
             md5=r["md5"],
-            bbox=list(r["bbox"]),
+            bbox=bbox_list,
             dist=float(r.get("_distance", 0.0)) ** 0.5,
             name=r.get("name"),
             img_url=f"/img/face?md5={r['md5']}&bbox={bx1},{by1},{bx2},{by2}",
             photo_path=_photo_path(r["md5"]),
+            rel_size=round(_rel_size(r["md5"], bbox_list), 3),
         )
 
     # Fetch generously so Python-side filtering (seed + unlabeled_only) still

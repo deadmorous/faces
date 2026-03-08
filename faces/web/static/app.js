@@ -178,30 +178,42 @@ window.addEventListener("DOMContentLoaded", route);
 // ---------------------------------------------------------------------------
 // View: Unlabeled faces
 // ---------------------------------------------------------------------------
-async function renderUnlabeled(page = 1) {
+let _unlabeledRelSizeMin = 0.0;
+
+async function renderUnlabeled(page = 1, relSizeMin = _unlabeledRelSizeMin) {
+  _unlabeledRelSizeMin = relSizeMin;
   showSpinner();
   let data;
   try {
-    data = await apiFetch(`/api/faces/unlabeled?page=${page}&page_size=100`);
+    data = await apiFetch(`/api/faces/unlabeled?page=${page}&page_size=100&rel_size_min=${relSizeMin}`);
   } catch (e) { showError(e.message); return; }
 
   const app = document.getElementById("app");
   const totalPages = Math.ceil(data.total / 100);
 
   let html = `<h2>Unlabeled faces <span class="badge">${data.total}</span></h2>`;
+  html += `<div class="threshold-row">
+    <label>Rel size ≥ <strong id="rel-size-val">${relSizeMin.toFixed(2)}</strong></label>
+    <input type="range" id="rel-size-slider" min="0.0" max="1.0" step="0.05" value="${relSizeMin}">
+  </div>`;
 
   if (data.faces.length === 0) {
     html += `<p>No unlabeled faces.</p>`;
     app.innerHTML = html;
+    document.getElementById("rel-size-slider").addEventListener("input", e => {
+      document.getElementById("rel-size-val").textContent = parseFloat(e.target.value).toFixed(2);
+    });
+    document.getElementById("rel-size-slider").addEventListener("change", e => {
+      renderUnlabeled(1, parseFloat(e.target.value));
+    });
     return;
   }
 
   html += `<div class="face-grid">`;
   data.faces.forEach(f => {
-    const [x1, y1, x2, y2] = f.bbox;
     html += `
       <div class="face-cell">
-        <img src="${f.img_url}" loading="lazy" title="${f.md5}">
+        <img src="${f.img_url}" loading="lazy" title="${f.md5} (rel_size ${f.rel_size ?? "?"})">
         <a href="#/photos/${f.md5}" target="_blank" class="face-link-btn" title="Open photo">↗</a>
         <a href="#/similar/${f.md5}/${bboxToPathParam(f.bbox)}" class="similar-link-btn" title="Find similar">≈</a>
       </div>`;
@@ -217,18 +229,27 @@ async function renderUnlabeled(page = 1) {
   }
 
   app.innerHTML = html;
+
+  let relSizeTimer;
+  document.getElementById("rel-size-slider").addEventListener("input", e => {
+    document.getElementById("rel-size-val").textContent = parseFloat(e.target.value).toFixed(2);
+    clearTimeout(relSizeTimer);
+    relSizeTimer = setTimeout(() => renderUnlabeled(1, parseFloat(e.target.value)), 400);
+  });
 }
 
 
 // ---------------------------------------------------------------------------
 // View: Classify
 // ---------------------------------------------------------------------------
-let _classifyAlgo   = localStorage.getItem("classifyAlgo")   || "centroid";
-let _classifyPerson = localStorage.getItem("classifyPerson")  || null;
+let _classifyAlgo        = localStorage.getItem("classifyAlgo")   || "centroid";
+let _classifyPerson      = localStorage.getItem("classifyPerson")  || null;
+let _classifyRelSizeMin  = 0.0;
 
-async function renderClassify(threshold = null, algo = null, person = null) {
-  if (algo   !== null) { _classifyAlgo   = algo;   localStorage.setItem("classifyAlgo",   algo); }
-  if (person !== null) { _classifyPerson = person; localStorage.setItem("classifyPerson", person); }
+async function renderClassify(threshold = null, algo = null, person = null, relSizeMin = null) {
+  if (algo        !== null) { _classifyAlgo       = algo;       localStorage.setItem("classifyAlgo",   algo); }
+  if (person      !== null) { _classifyPerson     = person;     localStorage.setItem("classifyPerson", person); }
+  if (relSizeMin  !== null) { _classifyRelSizeMin = relSizeMin; }
   showSpinner();
 
   let algorithms;
@@ -244,9 +265,10 @@ async function renderClassify(threshold = null, algo = null, person = null) {
 
   const currentAlgo = _classifyAlgo;
 
+  const currentRelSizeMin = _classifyRelSizeMin;
   // effectiveThreshold is the Euclidean eps; API expects cosine threshold = 1 - eps²/2
   const threshParam = threshold !== null ? `&threshold=${1 - threshold * threshold / 2}` : "";
-  const baseParams  = `algo=${encodeURIComponent(currentAlgo)}&min_size=3${threshParam}`;
+  const baseParams  = `algo=${encodeURIComponent(currentAlgo)}&min_size=3${threshParam}&rel_size_min=${currentRelSizeMin}`;
 
   let peopleList;
   try {
@@ -298,6 +320,8 @@ async function renderClassify(threshold = null, algo = null, person = null) {
       <select id="algo-select">${algoOptions}</select>
       <label>Threshold: <strong id="thresh-val">${effectiveThreshold.toFixed(2)}</strong></label>
       <input type="range" id="thresh-slider" min="0.1" max="2.0" step="0.01" value="${effectiveThreshold}">
+      <label>Rel size ≥ <strong id="rel-size-val">${currentRelSizeMin.toFixed(2)}</strong></label>
+      <input type="range" id="rel-size-slider" min="0.0" max="1.0" step="0.05" value="${currentRelSizeMin}">
     </div>`;
 
   if (faces.length === 0) {
@@ -351,6 +375,14 @@ async function renderClassify(threshold = null, algo = null, person = null) {
     document.getElementById("thresh-val").textContent = parseFloat(e.target.value).toFixed(2);
     clearTimeout(threshTimer);
     threshTimer = setTimeout(() => renderClassify(parseFloat(e.target.value)), 400);
+  });
+
+  // Rel size slider
+  let relSizeTimer;
+  document.getElementById("rel-size-slider").addEventListener("input", e => {
+    document.getElementById("rel-size-val").textContent = parseFloat(e.target.value).toFixed(2);
+    clearTimeout(relSizeTimer);
+    relSizeTimer = setTimeout(() => renderClassify(effectiveThreshold, null, null, parseFloat(e.target.value)), 400);
   });
 
   function _updateSelectAllCheckbox() {
@@ -838,7 +870,7 @@ async function renderPersonFaces(name, page = 1) {
 // ---------------------------------------------------------------------------
 // View: Similar faces
 // ---------------------------------------------------------------------------
-async function renderSimilar(md5, bboxParam, unlabeledOnly = true, maxDist = null) {
+async function renderSimilar(md5, bboxParam, unlabeledOnly = true, maxDist = null, relSizeMin = 0.0) {
   showSpinner();
   const bboxQuery = bboxParam.replace(/_/g, ",");
   let data, people;
@@ -861,7 +893,7 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = true, maxDist = nul
   const maxResultDist = allFaces.length > 0 ? Math.max(...allFaces.map(f => f.dist)) : 1.0;
   const sliderMax = Math.max(maxResultDist * 1.1, 0.5);
   const effectiveMaxDist = maxDist !== null ? maxDist : maxResultDist;
-  const visibleFaces = allFaces.filter(f => f.dist <= effectiveMaxDist);
+  const visibleFaces = allFaces.filter(f => f.dist <= effectiveMaxDist && f.rel_size >= relSizeMin);
 
   const selected = new Set();
   const app = document.getElementById("app");
@@ -886,6 +918,8 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = true, maxDist = nul
     <div class="threshold-row">
       <label>Max dist: <strong id="thresh-val">${effectiveMaxDist.toFixed(2)}</strong></label>
       <input type="range" id="thresh-slider" min="0.0" max="${sliderMax.toFixed(2)}" step="0.01" value="${effectiveMaxDist}">
+      <label>Rel size ≥ <strong id="rel-size-val">${relSizeMin.toFixed(2)}</strong></label>
+      <input type="range" id="rel-size-slider" min="0.0" max="1.0" step="0.05" value="${relSizeMin}">
     </div>
     <div style="display:flex;align-items:center;gap:0.75rem;margin:0.5rem 0;">
       <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;margin:0;">
@@ -936,7 +970,14 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = true, maxDist = nul
   document.getElementById("thresh-slider").addEventListener("input", e => {
     document.getElementById("thresh-val").textContent = parseFloat(e.target.value).toFixed(2);
     clearTimeout(threshTimer);
-    threshTimer = setTimeout(() => renderSimilar(md5, bboxParam, unlabeledOnly, parseFloat(e.target.value)), 300);
+    threshTimer = setTimeout(() => renderSimilar(md5, bboxParam, unlabeledOnly, parseFloat(e.target.value), relSizeMin), 300);
+  });
+
+  let relSizeTimer;
+  document.getElementById("rel-size-slider").addEventListener("input", e => {
+    document.getElementById("rel-size-val").textContent = parseFloat(e.target.value).toFixed(2);
+    clearTimeout(relSizeTimer);
+    relSizeTimer = setTimeout(() => renderSimilar(md5, bboxParam, unlabeledOnly, effectiveMaxDist, parseFloat(e.target.value)), 300);
   });
 
   document.getElementById("select-all-similar").addEventListener("change", e => {
@@ -951,7 +992,7 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = true, maxDist = nul
   });
 
   document.getElementById("unlabeled-only").addEventListener("change", e => {
-    renderSimilar(md5, bboxParam, e.target.checked, effectiveMaxDist);
+    renderSimilar(md5, bboxParam, e.target.checked, effectiveMaxDist, relSizeMin);
   });
 
   app.querySelectorAll(".face-grid img").forEach(img => {
@@ -996,7 +1037,7 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = true, maxDist = nul
         _classifyPerson = label;
         localStorage.setItem("classifyPerson", label);
       }
-      setTimeout(() => renderSimilar(md5, bboxParam, unlabeledOnly, effectiveMaxDist), 1500);
+      setTimeout(() => renderSimilar(md5, bboxParam, unlabeledOnly, effectiveMaxDist, relSizeMin), 1500);
     } catch (e) {
       btn.disabled = false;
       btn.textContent = "Apply to selected";
@@ -1021,7 +1062,7 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = true, maxDist = nul
     btnFR.disabled = true;
     try {
       await apiPost("/api/classify/labels", items);
-      setTimeout(() => renderSimilar(md5, bboxParam, unlabeledOnly, effectiveMaxDist), 1500);
+      setTimeout(() => renderSimilar(md5, bboxParam, unlabeledOnly, effectiveMaxDist, relSizeMin), 1500);
     } catch (e) {
       btnNF.disabled = false;
       btnFR.disabled = false;

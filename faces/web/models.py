@@ -112,6 +112,7 @@ class SimilarFace(BaseModel):
     name: Optional[str]
     img_url: str
     photo_path: str
+    rel_size: float = 1.0
 
 
 class SimilarFacesResponse(BaseModel):

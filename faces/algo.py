@@ -73,6 +73,7 @@ def classify_candidates(
     rows: list[dict] | None = None,
     X: np.ndarray | None = None,
     algo: str = DEFAULT_ALGO,
+    rel_size_min: float = 0.0,
 ) -> dict:
     """Run single-linkage classify logic and return grouped candidates.
 
@@ -137,6 +138,7 @@ def classify_candidates(
     unlabeled_indices = [
         i for i, row in enumerate(rows)
         if not row.get("name") and _in_time_range(row)
+        and (rel_size_min <= 0.0 or row.get("rel_size", 1.0) >= rel_size_min)
     ]
 
     if not valid_names or not unlabeled_indices:

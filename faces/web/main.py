@@ -9,6 +9,8 @@ Set the FACES_CONFIG environment variable to point to a specific config file:
 
 import logging
 import os
+import time
+from collections import defaultdict
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -40,6 +42,20 @@ async def lifespan(app: FastAPI):
     app.state.data_generation = 0
     app.state.classify_cache = {"generation": -1, "key": None, "result": None}
     rows, X = load_all_embeddings(db)
+    t0 = time.perf_counter()
+    max_perim: dict[str, float] = defaultdict(float)
+    for r in rows:
+        b = r["bbox"]
+        p = (b[2] - b[0]) + (b[3] - b[1])
+        if p > max_perim[r["md5"]]:
+            max_perim[r["md5"]] = p
+    for r in rows:
+        b = r["bbox"]
+        p = (b[2] - b[0]) + (b[3] - b[1])
+        mp = max_perim[r["md5"]]
+        r["rel_size"] = p / mp if mp > 0 else 1.0
+    print(f"rel_size computed in {(time.perf_counter()-t0)*1000:.1f} ms for {len(rows)} faces",
+          flush=True)
     index = {(r["md5"], tuple(r["bbox"])): i for i, r in enumerate(rows)}
     app.state.embeddings_cache = {"rows": rows, "X": X, "index": index}
     yield

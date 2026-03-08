@@ -2,6 +2,7 @@ import click
 
 from . import config as _config
 from .commands.classify import classify
+from .commands.info import info
 from .commands.optimize import optimize
 from .commands.scan import scan
 from .commands.serve import serve
@@ -48,6 +49,7 @@ def cli(ctx: click.Context, config_file: str | None, db: str | None,
 
 cli.add_command(scan)
 cli.add_command(classify)
+cli.add_command(info)
 cli.add_command(show)
 cli.add_command(optimize)
 cli.add_command(serve)

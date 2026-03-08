@@ -16,6 +16,7 @@ class Config:
     database: Path = Path("~/.local/share/faces/index.db")
     photos_dir: Optional[Path] = None
     cluster_threshold: float = 0.6
+    config_path: Optional[Path] = None
 
     def _resolve(self) -> "Config":
         self.database = Path(self.database).expanduser().resolve()
@@ -51,6 +52,7 @@ def load(config_file: Optional[str] = None) -> Config:
                 cfg.photos_dir = Path(data["photos_dir"])
             if "cluster_threshold" in data:
                 cfg.cluster_threshold = float(data["cluster_threshold"])
+            cfg.config_path = path
             break
 
     return cfg._resolve()

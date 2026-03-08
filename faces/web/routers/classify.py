@@ -47,12 +47,13 @@ def _get_cached_result(
     since: Optional[str],
     until: Optional[str],
     algo: str,
+    rel_size_min: float = 0.0,
 ) -> dict:
     """Return full classify result from cache or recompute."""
     if algo not in ALGORITHMS:
         raise HTTPException(status_code=422, detail=f"Unknown algorithm {algo!r}")
     effective_threshold = threshold if threshold is not None else cfg.cluster_threshold
-    cache_key = (algo, effective_threshold, min_size, since, until)
+    cache_key = (algo, effective_threshold, min_size, since, until, rel_size_min)
     cached = request.app.state.classify_cache
     generation = request.app.state.data_generation
 
@@ -71,6 +72,7 @@ def _get_cached_result(
                 rows=emb["rows"],
                 X=emb["X"],
                 algo=algo,
+                rel_size_min=rel_size_min,
             )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -86,11 +88,12 @@ def classify_people(
     since: Optional[str] = None,
     until: Optional[str] = None,
     algo: str = DEFAULT_ALGO,
+    rel_size_min: float = 0.0,
     db: Annotated[Database, Depends(get_db)] = ...,
     cfg: Annotated[Config, Depends(get_cfg)] = ...,
 ):
     """Return people with matching unlabeled candidates, sorted by avg_dist ascending."""
-    result = _get_cached_result(request, db, cfg, threshold, min_size, since, until, algo)
+    result = _get_cached_result(request, db, cfg, threshold, min_size, since, until, algo, rel_size_min)
     return [
         {"name": g["person"], "face_count": len(g["faces"]), "avg_dist": g["avg_dist"]}
         for g in result["groups"]
@@ -107,6 +110,7 @@ def get_candidates(
     since: Optional[str] = None,
     until: Optional[str] = None,
     algo: str = DEFAULT_ALGO,
+    rel_size_min: float = 0.0,
     db: Annotated[Database, Depends(get_db)] = ...,
     cfg: Annotated[Config, Depends(get_cfg)] = ...,
 ):
@@ -114,7 +118,7 @@ def get_candidates(
 
     When *person* is None, returns all groups (backward-compat, no pagination).
     """
-    result = _get_cached_result(request, db, cfg, threshold, min_size, since, until, algo)
+    result = _get_cached_result(request, db, cfg, threshold, min_size, since, until, algo, rel_size_min)
 
     path_cache: dict[str, str] = {}
 
