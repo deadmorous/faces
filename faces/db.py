@@ -210,21 +210,23 @@ def parse_date(s: str, end_of_period: bool = False) -> float:
 
 
 def load_photo_dates(db: Database) -> dict[str, float]:
-    """Return {md5: date} using exif_date when available, falling back to mtime.
+    """Return {md5: exif_date} for photos that have an EXIF date.
 
-    exif_date (EXIF DateTimeOriginal) reflects when the photo was taken;
-    mtime is the filesystem modification time and is used only as a fallback
-    for photos that have no EXIF data or were scanned before exif_date was
-    added.
+    Photos absent from the result have no EXIF date and should pass date filters.
     """
     with timed("load_photo_dates: DB scan"):
         rows = db.photos.search().limit(10_000_000).to_list()
-    result: dict[str, float] = {}
-    for r in rows:
-        date = r.get("exif_date") or r.get("mtime")
-        if date:
-            result[r["md5"]] = date
-    return result
+    return {r["md5"]: r["exif_date"] for r in rows if r.get("exif_date")}
+
+
+def photo_date_coverage(db: Database) -> tuple[int | None, int | None]:
+    """Return (min_year, max_year) from exif_date, or (None, None) if no dated photos."""
+    rows = db.photos.search().limit(10_000_000).to_list()
+    dates = [r["exif_date"] for r in rows if r.get("exif_date")]
+    if not dates:
+        return None, None
+    to_year = lambda ts: datetime.datetime.fromtimestamp(ts).year
+    return to_year(min(dates)), to_year(max(dates))
 
 
 def load_all_embeddings(db: Database) -> tuple[list[dict], np.ndarray]:

@@ -70,6 +70,8 @@ def classify_candidates(
     min_size: int = 3,
     since: str | None = None,
     until: str | None = None,
+    ref_since: str | None = None,
+    ref_until: str | None = None,
     rows: list[dict] | None = None,
     X: np.ndarray | None = None,
     algo: str = DEFAULT_ALGO,
@@ -98,6 +100,8 @@ def classify_candidates(
     try:
         since_ts = parse_date(since) if since else None
         until_ts = parse_date(until, end_of_period=True) if until else None
+        ref_since_ts = parse_date(ref_since) if ref_since else None
+        ref_until_ts = parse_date(ref_until, end_of_period=True) if ref_until else None
     except ValueError as e:
         raise ValueError(str(e))
 
@@ -105,9 +109,8 @@ def classify_candidates(
         with timed("classify_candidates: load_all_embeddings"):
             rows, X = load_all_embeddings(db)
 
-    photo_mtimes: dict[str, float] | None = None
-    if since_ts is not None or until_ts is not None:
-        photo_mtimes = load_photo_dates(db)
+    need_dates = any([since_ts, until_ts, ref_since_ts, ref_until_ts])
+    photo_dates: dict[str, float] | None = load_photo_dates(db) if need_dates else None
 
     if not rows:
         return {"eps": eps, "groups": [], "unmatched": []}
@@ -118,22 +121,35 @@ def classify_candidates(
         if row.get("name"):
             named_groups[row["name"]].append(i)
 
-    valid_names = {
-        name for name, indices in named_groups.items()
-        if len(indices) >= min_size and name not in SPECIAL_LABELS
-    }
-
     def _in_time_range(row: dict) -> bool:
-        if photo_mtimes is None:
+        if photo_dates is None:
             return True
-        mt = photo_mtimes.get(row["md5"])
+        mt = photo_dates.get(row["md5"])
         if mt is None:
-            return False
+            return True   # no EXIF date → always include
         if since_ts is not None and mt < since_ts:
             return False
         if until_ts is not None and mt >= until_ts:
             return False
         return True
+
+    def _in_ref_range(md5: str) -> bool:
+        if ref_since_ts is None and ref_until_ts is None:
+            return True
+        mt = photo_dates.get(md5) if photo_dates else None
+        if mt is None:
+            return True   # no EXIF → include in reference
+        if ref_since_ts is not None and mt < ref_since_ts:
+            return False
+        if ref_until_ts is not None and mt >= ref_until_ts:
+            return False
+        return True
+
+    valid_names = {
+        name for name, indices in named_groups.items()
+        if sum(1 for i in indices if _in_ref_range(rows[i]["md5"])) >= min_size
+        and name not in SPECIAL_LABELS
+    }
 
     unlabeled_indices = [
         i for i, row in enumerate(rows)
@@ -152,7 +168,7 @@ def classify_candidates(
 
     all_labeled_idx = [
         i for i, row in enumerate(rows)
-        if row.get("name") in valid_names
+        if row.get("name") in valid_names and _in_ref_range(row["md5"])
     ]
     labeled_X = X[all_labeled_idx]
     labeled_names_arr = [rows[i]["name"] for i in all_labeled_idx]

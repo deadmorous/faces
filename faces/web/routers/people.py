@@ -88,17 +88,18 @@ def get_person(
 
     md5s = set(md5_bboxes.keys())
 
-    # Time filter
+    # Time filter (photos without EXIF date always pass)
     if since_ts is not None or until_ts is not None:
         photo_dates = load_photo_dates(db)
         filtered: set[str] = set()
         for md5 in md5s:
-            date = photo_dates.get(md5)
-            if date is None:
+            mt = photo_dates.get(md5)
+            if mt is None:               # no EXIF → include
+                filtered.add(md5)
                 continue
-            if since_ts is not None and date < since_ts:
+            if since_ts and mt < since_ts:
                 continue
-            if until_ts is not None and date >= until_ts:
+            if until_ts and mt >= until_ts:
                 continue
             filtered.add(md5)
         md5s = filtered
@@ -186,9 +187,17 @@ def list_person_faces(
     name: str,
     page: int = 1,
     page_size: int = 200,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
     db: Annotated[Database, Depends(get_db)] = ...,
 ):
     """Return all individual face crops labeled with this name, paginated."""
+    try:
+        since_ts = parse_date(since) if since else None
+        until_ts = parse_date(until, end_of_period=True) if until else None
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
     rows = (
         db.faces.search()
         .where(f"name = '{name}'", prefilter=True)
@@ -197,6 +206,16 @@ def list_person_faces(
     )
     if not rows:
         raise HTTPException(status_code=404, detail=f"Person {name!r} not found")
+
+    if since_ts or until_ts:
+        photo_dates = load_photo_dates(db)
+        def _passes_date(md5: str) -> bool:
+            mt = photo_dates.get(md5)
+            if mt is None: return True   # no EXIF → include
+            if since_ts and mt < since_ts: return False
+            if until_ts and mt >= until_ts: return False
+            return True
+        rows = [r for r in rows if _passes_date(r["md5"])]
 
     total = len(rows)
     start = (page - 1) * page_size

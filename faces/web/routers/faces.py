@@ -1,12 +1,12 @@
 """/api/faces — set sticky label on individual faces; find similar faces."""
 
-from typing import Annotated
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from ..deps import get_db
 from ..models import FaceLabelRequest, SimilarFace, SimilarFacesResponse
-from ...db import Database, stick_face
+from ...db import Database, load_photo_dates, parse_date, stick_face
 
 router = APIRouter(prefix="/api/faces", tags=["faces"])
 
@@ -17,15 +17,31 @@ def list_unlabeled_faces(
     page: int = 1,
     page_size: int = 100,
     rel_size_min: float = 0.0,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    db: Annotated[Database, Depends(get_db)] = ...,
 ):
-    """Return unlabeled faces sorted by bounding-box perimeter descending (largest first).
+    """Return unlabeled faces sorted by bounding-box perimeter descending (largest first)."""
+    try:
+        since_ts = parse_date(since) if since else None
+        until_ts = parse_date(until, end_of_period=True) if until else None
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
-    Served entirely from the in-memory embeddings cache — no DB queries.
-    """
+    photo_dates = load_photo_dates(db) if (since_ts or until_ts) else None
+
     all_rows = request.app.state.embeddings_cache["rows"]
     unlabeled = [r for r in all_rows if not r.get("name")]
     if rel_size_min > 0.0:
         unlabeled = [r for r in unlabeled if r.get("rel_size", 1.0) >= rel_size_min]
+    if photo_dates is not None:
+        def _in_range(r):
+            mt = photo_dates.get(r["md5"])
+            if mt is None: return True   # no EXIF → include
+            if since_ts and mt < since_ts: return False
+            if until_ts and mt >= until_ts: return False
+            return True
+        unlabeled = [r for r in unlabeled if _in_range(r)]
     unlabeled.sort(
         key=lambda r: (r["bbox"][2] - r["bbox"][0]) + (r["bbox"][3] - r["bbox"][1]),
         reverse=True,
@@ -105,6 +121,8 @@ def get_similar_faces(
     bbox: str = Query(..., description="x1,y1,x2,y2 in original image pixels"),
     limit: int = 100,
     unlabeled_only: bool = False,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
     db: Annotated[Database, Depends(get_db)] = ...,
 ):
     """Return up to *limit* faces sorted by embedding distance to the seed face."""
@@ -115,6 +133,12 @@ def get_similar_faces(
         x1, y1, x2, y2 = parts
     except ValueError:
         raise HTTPException(status_code=422, detail="bbox must be x1,y1,x2,y2 integers")
+
+    try:
+        since_ts = parse_date(since) if since else None
+        until_ts = parse_date(until, end_of_period=True) if until else None
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
     # Look up seed face — query by md5 only, match bbox in Python to avoid
     # any LanceDB SQL array-indexing edge cases.
@@ -165,9 +189,11 @@ def get_similar_faces(
             rel_size=round(_rel_size(r["md5"], bbox_list), 3),
         )
 
-    # Fetch generously so Python-side filtering (seed + unlabeled_only) still
+    # Fetch generously so Python-side filtering (seed + unlabeled_only + date) still
     # yields up to `limit` results. LanceDB returns _distance = squared L2.
-    fetch_n = limit * 3 + 1 if unlabeled_only else limit + 1
+    needs_date_filter = since_ts is not None or until_ts is not None
+    photo_dates_similar = load_photo_dates(db) if needs_date_filter else None
+    fetch_n = limit * 5 + 1 if (unlabeled_only or needs_date_filter) else limit + 1
     candidates = db.faces.search(seed_embedding).limit(fetch_n).to_list()
 
     seed_face = _make(seed_row)
@@ -179,6 +205,13 @@ def get_similar_faces(
             continue  # skip seed
         if unlabeled_only and r.get("name"):
             continue
+        if photo_dates_similar is not None:
+            mt = photo_dates_similar.get(r["md5"])
+            if mt is not None:
+                if since_ts and mt < since_ts:
+                    continue
+                if until_ts and mt >= until_ts:
+                    continue
         results.append(_make(r))
         if len(results) >= limit:
             break

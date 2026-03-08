@@ -31,6 +31,23 @@
         <label>Algorithm</label>
         <select id="sb-algo"></select>
       </div>
+      <div class="sidebar-group hidden" id="sb-group-daterange">
+        <label>Date range</label>
+        <div id="sb-date-coverage" class="year-range-hint"></div>
+        <div class="year-range">
+          <input type="number" id="sb-date-from" placeholder="From" min="1900" max="2100">
+          <span>–</span>
+          <input type="number" id="sb-date-to" placeholder="To" min="1900" max="2100">
+        </div>
+      </div>
+      <div class="sidebar-group hidden" id="sb-group-refrange">
+        <label>Reference range</label>
+        <div class="year-range">
+          <input type="number" id="sb-ref-from" placeholder="From" min="1900" max="2100">
+          <span>–</span>
+          <input type="number" id="sb-ref-to" placeholder="To" min="1900" max="2100">
+        </div>
+      </div>
     </aside>
     <main id="app"></main>
   </div>

@@ -9,7 +9,7 @@ from PIL import Image
 from ..deps import get_cfg, get_db
 from ..models import PhotoDetail, PhotoFaceDetail, PhotoList, PhotoSummary
 from ...config import Config
-from ...db import Database, load_photo_dates, parse_date
+from ...db import Database, load_photo_dates, parse_date, photo_date_coverage
 
 router = APIRouter(prefix="/api/photos", tags=["photos"])
 
@@ -38,12 +38,13 @@ def list_photos(
 
     all_rows = db.photos.search().limit(10_000_000).to_list()
 
-    # Time filter
+    # Time filter (photos without EXIF date always pass)
     if since_ts is not None or until_ts is not None:
         filtered = []
         for row in all_rows:
-            date = row.get("exif_date") or row.get("mtime")
+            date = row.get("exif_date")
             if date is None:
+                filtered.append(row)   # no EXIF → always include
                 continue
             if since_ts is not None and date < since_ts:
                 continue
@@ -52,7 +53,7 @@ def list_photos(
             filtered.append(row)
         all_rows = filtered
 
-    all_rows.sort(key=lambda r: r.get("exif_date") or r.get("mtime") or 0, reverse=True)
+    all_rows.sort(key=lambda r: r.get("exif_date") or 0, reverse=True)
 
     total = len(all_rows)
     start = (page - 1) * page_size
@@ -70,6 +71,13 @@ def list_photos(
         for row in page_rows
     ]
     return PhotoList(total=total, photos=photos)
+
+
+@router.get("/date_coverage", summary="Min/max EXIF year in the database")
+def date_coverage_endpoint(db: Annotated[Database, Depends(get_db)] = ...):
+    """Return the min and max year from EXIF dates across all photos."""
+    min_y, max_y = photo_date_coverage(db)
+    return {"min_year": min_y, "max_year": max_y}
 
 
 @router.get("/{md5}", response_model=PhotoDetail, summary="Photo detail with all detected faces")

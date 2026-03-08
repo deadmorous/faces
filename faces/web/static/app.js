@@ -8,8 +8,12 @@ let _cleanup = null;
 
 // Shared sidebar params (persisted across page loads)
 const _params = {
-  threshold:  parseFloat(localStorage.getItem("sb_threshold")  || "1.0"),
-  relSizeMin: parseFloat(localStorage.getItem("sb_relSizeMin") || "0.0"),
+  threshold:   parseFloat(localStorage.getItem("sb_threshold")   || "1.0"),
+  relSizeMin:  parseFloat(localStorage.getItem("sb_relSizeMin")  || "0.0"),
+  dateFrom:    localStorage.getItem("sb_dateFrom")    || "",
+  dateTo:      localStorage.getItem("sb_dateTo")      || "",
+  refDateFrom: localStorage.getItem("sb_refDateFrom") || "",
+  refDateTo:   localStorage.getItem("sb_refDateTo")   || "",
 };
 let _currentView     = null;   // "unlabeled" | "classify" | "similar" | ...
 let _currentViewArgs = {};     // per-view re-render args
@@ -60,6 +64,22 @@ function bboxToQuery(bbox) {
 
 function bboxToPathParam(bbox) {
   return bbox.join("_");
+}
+
+function dateQs() {
+  const p = [];
+  if (_params.dateFrom) p.push(`since=${_params.dateFrom}`);
+  if (_params.dateTo)   p.push(`until=${_params.dateTo}`);
+  return p.join("&");
+}
+function refDateQs() {
+  const p = [];
+  if (_params.refDateFrom) p.push(`ref_since=${_params.refDateFrom}`);
+  if (_params.refDateTo)   p.push(`ref_until=${_params.refDateTo}`);
+  return p.join("&");
+}
+function appendQs(base, qs) {
+  return qs ? `${base}&${qs}` : base;
 }
 
 // Attach rubber-band rectangular selection to a face grid.
@@ -138,21 +158,28 @@ function showError(msg) {
 // Sidebar helpers
 // ---------------------------------------------------------------------------
 function setSidebarView(view) {
-  const showThresh  = ["classify", "similar"].includes(view);
-  const showRelSize = ["unlabeled", "classify", "similar"].includes(view);
-  const showAlgo    = view === "classify";
+  const showThresh     = ["classify", "similar"].includes(view);
+  const showRelSize    = ["unlabeled", "classify", "similar"].includes(view);
+  const showAlgo       = view === "classify";
+  const showDateRange  = ["unlabeled", "classify", "similar", "photos", "personDetail", "personFaces"].includes(view);
+  const showRefRange   = view === "classify";
   document.getElementById("sb-group-threshold").classList.toggle("hidden", !showThresh);
   document.getElementById("sb-group-relsize")  .classList.toggle("hidden", !showRelSize);
   document.getElementById("sb-group-algo")     .classList.toggle("hidden", !showAlgo);
+  document.getElementById("sb-group-daterange").classList.toggle("hidden", !showDateRange);
+  document.getElementById("sb-group-refrange") .classList.toggle("hidden", !showRefRange);
 }
 
 function rerenderCurrentView() {
   switch (_currentView) {
-    case "unlabeled": renderUnlabeled(_currentViewArgs.page || 1); break;
-    case "classify":  renderClassify(); break;
-    case "similar":   renderSimilar(
+    case "unlabeled":    renderUnlabeled(_currentViewArgs.page || 1); break;
+    case "classify":     renderClassify(); break;
+    case "similar":      renderSimilar(
       _currentViewArgs.md5, _currentViewArgs.bboxParam,
       _currentViewArgs.unlabeledOnly); break;
+    case "photos":       renderPhotos(_currentViewArgs.page || 1); break;
+    case "personDetail": renderPersonDetail(_currentViewArgs.name, _currentViewArgs.page || 1); break;
+    case "personFaces":  renderPersonFaces(_currentViewArgs.name, _currentViewArgs.page || 1); break;
   }
 }
 
@@ -166,6 +193,16 @@ function initSidebar() {
   sbThreshVal.textContent  = _params.threshold.toFixed(2);
   sbRelSize.value          = _params.relSizeMin;
   sbRelSizeVal.textContent = _params.relSizeMin.toFixed(2);
+
+  // Restore date inputs from params
+  const sbDateFrom = document.getElementById("sb-date-from");
+  const sbDateTo   = document.getElementById("sb-date-to");
+  const sbRefFrom  = document.getElementById("sb-ref-from");
+  const sbRefTo    = document.getElementById("sb-ref-to");
+  if (_params.dateFrom)    sbDateFrom.value = _params.dateFrom;
+  if (_params.dateTo)      sbDateTo.value   = _params.dateTo;
+  if (_params.refDateFrom) sbRefFrom.value  = _params.refDateFrom;
+  if (_params.refDateTo)   sbRefTo.value    = _params.refDateTo;
 
   let threshTimer, relSizeTimer;
   sbThresh.addEventListener("input", e => {
@@ -187,6 +224,34 @@ function initSidebar() {
     localStorage.setItem("classifyAlgo", _classifyAlgo);
     rerenderCurrentView();
   });
+
+  sbDateFrom.addEventListener("change", e => {
+    _params.dateFrom = e.target.value.trim();
+    localStorage.setItem("sb_dateFrom", _params.dateFrom);
+    rerenderCurrentView();
+  });
+  sbDateTo.addEventListener("change", e => {
+    _params.dateTo = e.target.value.trim();
+    localStorage.setItem("sb_dateTo", _params.dateTo);
+    rerenderCurrentView();
+  });
+  sbRefFrom.addEventListener("change", e => {
+    _params.refDateFrom = e.target.value.trim();
+    localStorage.setItem("sb_refDateFrom", _params.refDateFrom);
+    rerenderCurrentView();
+  });
+  sbRefTo.addEventListener("change", e => {
+    _params.refDateTo = e.target.value.trim();
+    localStorage.setItem("sb_refDateTo", _params.refDateTo);
+    rerenderCurrentView();
+  });
+
+  // Fetch DB date coverage hint
+  apiFetch("/api/photos/date_coverage").then(d => {
+    const hint = document.getElementById("sb-date-coverage");
+    if (d.min_year && d.max_year)
+      hint.textContent = `DB: ${d.min_year} – ${d.max_year}`;
+  }).catch(() => {});
 }
 
 // ---------------------------------------------------------------------------
@@ -204,48 +269,64 @@ function route() {
     el.classList.toggle("active", parts[0] === el.dataset.nav);
   });
 
-  setSidebarView(parts[0]);
-
   switch (parts[0]) {
     case "unlabeled":
       _currentView = "unlabeled";
       _currentViewArgs = { page: parts[1] === "page" ? parseInt(parts[2], 10) || 1 : 1 };
+      setSidebarView("unlabeled");
       renderUnlabeled(_currentViewArgs.page);
       break;
     case "classify":
       _currentView = "classify";
       _currentViewArgs = {};
+      setSidebarView("classify");
       renderClassify();
       break;
     case "photos":
-      _currentView = null;
-      _currentViewArgs = {};
-      if (parts[1] === "page") renderPhotos(parseInt(parts[2], 10) || 1);
-      else if (parts[1]) renderPhotoDetail(parts[1]);
-      else renderPhotos(1);
+      if (parts[1] === "page") {
+        _currentView = "photos"; _currentViewArgs = { page: parseInt(parts[2], 10) || 1 };
+        setSidebarView("photos");
+        renderPhotos(_currentViewArgs.page);
+      } else if (parts[1]) {
+        _currentView = null; _currentViewArgs = {};   // photo detail — no date re-render
+        setSidebarView("photoDetail");
+        renderPhotoDetail(parts[1]);
+      } else {
+        _currentView = "photos"; _currentViewArgs = { page: 1 };
+        setSidebarView("photos");
+        renderPhotos(1);
+      }
       break;
     case "people":
-      _currentView = null;
-      _currentViewArgs = {};
       if (parts[1] && parts[2] === "faces") {
         const pg = parts[3] === "page" ? parseInt(parts[4], 10) || 1 : 1;
-        renderPersonFaces(decodeURIComponent(parts[1]), pg);
+        _currentView = "personFaces"; _currentViewArgs = { name: decodeURIComponent(parts[1]), page: pg };
+        setSidebarView("personFaces");
+        renderPersonFaces(_currentViewArgs.name, pg);
       } else if (parts[1] && parts[2] === "page") {
-        renderPersonDetail(decodeURIComponent(parts[1]), parseInt(parts[3], 10) || 1);
+        _currentView = "personDetail"; _currentViewArgs = { name: decodeURIComponent(parts[1]), page: parseInt(parts[3], 10) || 1 };
+        setSidebarView("personDetail");
+        renderPersonDetail(_currentViewArgs.name, _currentViewArgs.page);
       } else if (parts[1]) {
-        renderPersonDetail(decodeURIComponent(parts[1]), 1);
+        _currentView = "personDetail"; _currentViewArgs = { name: decodeURIComponent(parts[1]), page: 1 };
+        setSidebarView("personDetail");
+        renderPersonDetail(_currentViewArgs.name, 1);
       } else {
+        _currentView = null; _currentViewArgs = {};   // people list — not date-filtered
+        setSidebarView("people");
         renderPeople();
       }
       break;
     case "similar":
       _currentView = "similar";
       _currentViewArgs = { md5: parts[1], bboxParam: parts[2], unlabeledOnly: true };
+      setSidebarView("similar");
       renderSimilar(parts[1], parts[2]);
       break;
     default:
       _currentView = "unlabeled";
       _currentViewArgs = { page: 1 };
+      setSidebarView("unlabeled");
       renderUnlabeled(1);
   }
 }
@@ -260,7 +341,7 @@ async function renderUnlabeled(page = 1) {
   showSpinner();
   let data;
   try {
-    data = await apiFetch(`/api/faces/unlabeled?page=${page}&page_size=100&rel_size_min=${_params.relSizeMin}`);
+    data = await apiFetch(appendQs(`/api/faces/unlabeled?page=${page}&page_size=100&rel_size_min=${_params.relSizeMin}`, dateQs()));
   } catch (e) { showError(e.message); return; }
 
   const app = document.getElementById("app");
@@ -329,7 +410,8 @@ async function renderClassify(person = null) {
 
   // effectiveThreshold is the Euclidean eps; API expects cosine threshold = 1 - eps²/2
   const threshParam = `&threshold=${1 - _params.threshold * _params.threshold / 2}`;
-  const baseParams  = `algo=${encodeURIComponent(_classifyAlgo)}&min_size=3${threshParam}&rel_size_min=${_params.relSizeMin}`;
+  const dqs = dateQs(), rqs = refDateQs();
+  const baseParams  = appendQs(appendQs(`algo=${encodeURIComponent(_classifyAlgo)}&min_size=3${threshParam}&rel_size_min=${_params.relSizeMin}`, dqs), rqs);
 
   let peopleList;
   try {
@@ -511,7 +593,7 @@ async function renderPhotos(page) {
   showSpinner();
   let data;
   try {
-    data = await apiFetch(`/api/photos?page=${page}&page_size=${PAGE_SIZE}`);
+    data = await apiFetch(appendQs(`/api/photos?page=${page}&page_size=${PAGE_SIZE}`, dateQs()));
   } catch (e) {
     showError(e.message);
     return;
@@ -669,7 +751,7 @@ async function renderPersonDetail(name, page = 1) {
   showSpinner();
   let data;
   try {
-    data = await apiFetch(`/api/people/${encodeURIComponent(name)}?page=${page}&page_size=50`);
+    data = await apiFetch(appendQs(`/api/people/${encodeURIComponent(name)}?page=${page}&page_size=50`, dateQs()));
   } catch (e) {
     showError(e.message);
     return;
@@ -722,7 +804,7 @@ async function renderPersonFaces(name, page = 1) {
   let data, people;
   try {
     [data, people] = await Promise.all([
-      apiFetch(`/api/people/${encodeURIComponent(name)}/faces?page=${page}&page_size=${PERSON_FACES_PAGE_SIZE}`),
+      apiFetch(appendQs(`/api/people/${encodeURIComponent(name)}/faces?page=${page}&page_size=${PERSON_FACES_PAGE_SIZE}`, dateQs())),
       apiFetch("/api/people"),
     ]);
   } catch (e) {
@@ -906,7 +988,7 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = true) {
   let data, people;
   try {
     [data, people] = await Promise.all([
-      apiFetch(`/api/faces/similar?md5=${md5}&bbox=${bboxQuery}&limit=100&unlabeled_only=${unlabeledOnly}`),
+      apiFetch(appendQs(`/api/faces/similar?md5=${md5}&bbox=${bboxQuery}&limit=100&unlabeled_only=${unlabeledOnly}`, dateQs())),
       apiFetch("/api/people"),
     ]);
   } catch (e) {

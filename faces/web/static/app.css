@@ -387,7 +387,7 @@
 }
 
 #sidebar {
-  width: 190px;
+  width: 210px;
   flex-shrink: 0;
   position: sticky;
   top: 1rem;
@@ -417,5 +417,24 @@
 .sidebar-group select { font-size: 0.85rem; padding: 0.25rem 0.5rem; }
 
 .sidebar-group.hidden { display: none; }
+
+.year-range {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+}
+.year-range input[type="number"] {
+  width: 82px;
+  padding: 0.2rem 0.3rem;
+  font-size: 0.8rem;
+  margin: 0;
+  text-align: center;
+}
+.year-range-hint {
+  font-size: 0.75rem;
+  color: var(--pico-muted-color);
+  margin-bottom: 0.3rem;
+}
 
 #app { flex: 1; min-width: 0; }
