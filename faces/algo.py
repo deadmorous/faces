@@ -61,7 +61,7 @@ ALGORITHMS: dict[str, tuple[str, _AlgoKernel]] = {
     "min_dist": ("Min distance", _algo_min_dist),
     "centroid":  ("Centroid",     _algo_centroid),
 }
-DEFAULT_ALGO = "min_dist"
+DEFAULT_ALGO = "centroid"
 
 
 def classify_candidates(

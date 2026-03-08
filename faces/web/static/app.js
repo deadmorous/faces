@@ -223,26 +223,34 @@ async function renderUnlabeled(page = 1) {
 // ---------------------------------------------------------------------------
 // View: Classify
 // ---------------------------------------------------------------------------
-let _classifyAlgo   = localStorage.getItem("classifyAlgo")   || "min_dist";
+let _classifyAlgo   = localStorage.getItem("classifyAlgo")   || "centroid";
 let _classifyPerson = localStorage.getItem("classifyPerson")  || null;
 
 async function renderClassify(threshold = null, algo = null, person = null) {
   if (algo   !== null) { _classifyAlgo   = algo;   localStorage.setItem("classifyAlgo",   algo); }
   if (person !== null) { _classifyPerson = person; localStorage.setItem("classifyPerson", person); }
-  const currentAlgo = _classifyAlgo;
-
   showSpinner();
+
+  let algorithms;
+  try {
+    algorithms = await apiFetch("/api/classify/algorithms");
+  } catch (e) { showError(e.message); return; }
+
+  // Validate algo — reset to first available if stored value no longer exists
+  if (!algorithms.find(a => a.name === _classifyAlgo)) {
+    _classifyAlgo = algorithms[0]?.name ?? "min_dist";
+    localStorage.setItem("classifyAlgo", _classifyAlgo);
+  }
+
+  const currentAlgo = _classifyAlgo;
 
   // effectiveThreshold is the Euclidean eps; API expects cosine threshold = 1 - eps²/2
   const threshParam = threshold !== null ? `&threshold=${1 - threshold * threshold / 2}` : "";
   const baseParams  = `algo=${encodeURIComponent(currentAlgo)}&min_size=3${threshParam}`;
 
-  let peopleList, algorithms;
+  let peopleList;
   try {
-    [peopleList, algorithms] = await Promise.all([
-      apiFetch(`/api/classify/people?${baseParams}`),
-      apiFetch("/api/classify/algorithms"),
-    ]);
+    peopleList = await apiFetch(`/api/classify/people?${baseParams}`);
   } catch (e) { showError(e.message); return; }
 
   // Validate / default selected person
