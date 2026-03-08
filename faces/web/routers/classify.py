@@ -14,8 +14,6 @@ from ...algo import ALGORITHMS, DEFAULT_ALGO, classify_candidates
 from ...config import Config
 from ...db import Database
 from ...timing import timed
-from .people import people_cache_to_list
-
 router = APIRouter(prefix="/api/classify", tags=["classify"])
 
 
@@ -40,27 +38,17 @@ def _photo_path_for_md5(db: Database, md5: str) -> str:
     return rows[0]["path"] if rows else ""
 
 
-@router.get("/candidates", response_model=ClassifyCandidates,
-            summary="Get unlabeled faces grouped by predicted person")
-def get_candidates(
+def _get_cached_result(
     request: Request,
-    threshold: Optional[float] = None,
-    min_size: int = 3,
-    page: int = 1,
-    page_size: int = 10,
-    since: Optional[str] = None,
-    until: Optional[str] = None,
-    algo: str = DEFAULT_ALGO,
-    db: Annotated[Database, Depends(get_db)] = ...,
-    cfg: Annotated[Config, Depends(get_cfg)] = ...,
-):
-    """Run classification and return candidates grouped by person.
-
-    Groups are sorted by avg_dist ascending (most confident first).
-    Unmatched faces (beyond eps) are included for foreign/non-face marking.
-    The full candidate list is cached keyed by (algo, threshold, min_size, since, until)
-    and a data_generation counter; page navigation is served from cache.
-    """
+    db: Database,
+    cfg: Config,
+    threshold: Optional[float],
+    min_size: int,
+    since: Optional[str],
+    until: Optional[str],
+    algo: str,
+) -> dict:
+    """Return full classify result from cache or recompute."""
     if algo not in ALGORITHMS:
         raise HTTPException(status_code=422, detail=f"Unknown algorithm {algo!r}")
     effective_threshold = threshold if threshold is not None else cfg.cluster_threshold
@@ -69,26 +57,65 @@ def get_candidates(
     generation = request.app.state.data_generation
 
     if cached["generation"] == generation and cached["key"] == cache_key:
-        result = cached["result"]
-    else:
-        emb = request.app.state.embeddings_cache
-        try:
-            with timed(f"GET /api/classify/candidates [{algo}]: classify_candidates (cache miss)"):
-                result = classify_candidates(
-                    db=db,
-                    threshold=effective_threshold,
-                    min_size=min_size,
-                    since=since,
-                    until=until,
-                    rows=emb["rows"],
-                    X=emb["X"],
-                    algo=algo,
-                )
-        except ValueError as e:
-            raise HTTPException(status_code=422, detail=str(e))
-        request.app.state.classify_cache = {"generation": generation, "key": cache_key, "result": result}
+        return cached["result"]
 
-    # Enrich with URLs — build photo path cache to avoid repeated lookups
+    emb = request.app.state.embeddings_cache
+    try:
+        with timed(f"classify_candidates [{algo}]: cache miss"):
+            result = classify_candidates(
+                db=db,
+                threshold=effective_threshold,
+                min_size=min_size,
+                since=since,
+                until=until,
+                rows=emb["rows"],
+                X=emb["X"],
+                algo=algo,
+            )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    request.app.state.classify_cache = {"generation": generation, "key": cache_key, "result": result}
+    return result
+
+
+@router.get("/people", summary="List people who have classify candidates")
+def classify_people(
+    request: Request,
+    threshold: Optional[float] = None,
+    min_size: int = 3,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    algo: str = DEFAULT_ALGO,
+    db: Annotated[Database, Depends(get_db)] = ...,
+    cfg: Annotated[Config, Depends(get_cfg)] = ...,
+):
+    """Return people with matching unlabeled candidates, sorted by avg_dist ascending."""
+    result = _get_cached_result(request, db, cfg, threshold, min_size, since, until, algo)
+    return [
+        {"name": g["person"], "face_count": len(g["faces"]), "avg_dist": g["avg_dist"]}
+        for g in result["groups"]
+    ]
+
+
+@router.get("/candidates", response_model=ClassifyCandidates,
+            summary="Get unlabeled faces for a specific person")
+def get_candidates(
+    request: Request,
+    person: Optional[str] = None,
+    threshold: Optional[float] = None,
+    min_size: int = 3,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    algo: str = DEFAULT_ALGO,
+    db: Annotated[Database, Depends(get_db)] = ...,
+    cfg: Annotated[Config, Depends(get_cfg)] = ...,
+):
+    """Return all unlabeled faces matching the given person (from cache).
+
+    When *person* is None, returns all groups (backward-compat, no pagination).
+    """
+    result = _get_cached_result(request, db, cfg, threshold, min_size, since, until, algo)
+
     path_cache: dict[str, str] = {}
 
     def _photo_path(md5: str) -> str:
@@ -96,13 +123,8 @@ def get_candidates(
             path_cache[md5] = _photo_path_for_md5(db, md5)
         return path_cache[md5]
 
-    all_groups = result["groups"]
-    total_groups = len(all_groups)
-    start = (page - 1) * page_size
-    page_groups = all_groups[start:start + page_size]
-
-    groups = [
-        ClassifyGroup(
+    def _enrich_group(g: dict) -> ClassifyGroup:
+        return ClassifyGroup(
             person=g["person"],
             avg_dist=g["avg_dist"],
             faces=[
@@ -117,25 +139,31 @@ def get_candidates(
                 for f in g["faces"]
             ],
         )
-        for g in page_groups
+
+    if person is not None:
+        raw = next((g for g in result["groups"] if g["person"] == person), None)
+        groups = [_enrich_group(raw)] if raw else []
+        return ClassifyCandidates(
+            eps=result["eps"],
+            total_groups=len(groups),
+            groups=groups,
+            unmatched=[],
+        )
+
+    # No person filter — return all groups
+    groups = [_enrich_group(g) for g in result["groups"]]
+    unmatched = [
+        UnmatchedFace(
+            md5=f["md5"],
+            bbox=f["bbox"],
+            img_url=_face_img_url(f["md5"], f["bbox"]),
+            photo_url=f"/img/photo/{f['md5']}",
+        )
+        for f in result["unmatched"]
     ]
-
-    # Unmatched only on page 1 to avoid re-rendering on every page navigation
-    unmatched = []
-    if page == 1:
-        unmatched = [
-            UnmatchedFace(
-                md5=f["md5"],
-                bbox=f["bbox"],
-                img_url=_face_img_url(f["md5"], f["bbox"]),
-                photo_url=f"/img/photo/{f['md5']}",
-            )
-            for f in result["unmatched"]
-        ]
-
     return ClassifyCandidates(
         eps=result["eps"],
-        total_groups=total_groups,
+        total_groups=len(groups),
         groups=groups,
         unmatched=unmatched,
     )

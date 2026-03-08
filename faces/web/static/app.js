@@ -142,7 +142,7 @@ function route() {
 
   switch (parts[0]) {
     case "classify":
-      renderClassify(parts[1] === "page" ? parseInt(parts[2], 10) || 1 : 1);
+      renderClassify();
       break;
     case "photos":
       if (parts[1] === "page") renderPhotos(parseInt(parts[2], 10) || 1);
@@ -165,7 +165,7 @@ function route() {
       renderSimilar(parts[1], parts[2]);
       break;
     default:
-      renderClassify(1);
+      renderClassify();
   }
 }
 
@@ -175,138 +175,117 @@ window.addEventListener("DOMContentLoaded", route);
 // ---------------------------------------------------------------------------
 // View: Classify
 // ---------------------------------------------------------------------------
-const CLASSIFY_PAGE_SIZE = 10;
-let _classifyAlgo = localStorage.getItem("classifyAlgo") || "min_dist";
+let _classifyAlgo   = localStorage.getItem("classifyAlgo")   || "min_dist";
+let _classifyPerson = localStorage.getItem("classifyPerson")  || null;
 
-async function renderClassify(page = 1, threshold = null, algo = null) {
-  if (algo !== null) { _classifyAlgo = algo; localStorage.setItem("classifyAlgo", algo); }
+async function renderClassify(threshold = null, algo = null, person = null) {
+  if (algo   !== null) { _classifyAlgo   = algo;   localStorage.setItem("classifyAlgo",   algo); }
+  if (person !== null) { _classifyPerson = person; localStorage.setItem("classifyPerson", person); }
   const currentAlgo = _classifyAlgo;
+
   showSpinner();
-  let data, people, algorithms;
+
+  // effectiveThreshold is the Euclidean eps; API expects cosine threshold = 1 - eps²/2
+  const threshParam = threshold !== null ? `&threshold=${1 - threshold * threshold / 2}` : "";
+  const baseParams  = `algo=${encodeURIComponent(currentAlgo)}&min_size=3${threshParam}`;
+
+  let peopleList, algorithms;
   try {
-    // effectiveThreshold is the Euclidean eps; API expects cosine threshold = 1 - eps²/2
-    const threshParam = threshold !== null ? `&threshold=${1 - threshold * threshold / 2}` : "";
-    [data, people, algorithms] = await Promise.all([
-      apiFetch(`/api/classify/candidates?min_size=3&page=${page}&page_size=${CLASSIFY_PAGE_SIZE}${threshParam}&algo=${currentAlgo}`),
-      apiFetch("/api/people"),
+    [peopleList, algorithms] = await Promise.all([
+      apiFetch(`/api/classify/people?${baseParams}`),
       apiFetch("/api/classify/algorithms"),
     ]);
-  } catch (e) {
-    showError(e.message);
-    return;
+  } catch (e) { showError(e.message); return; }
+
+  // Validate / default selected person
+  if (!_classifyPerson || !peopleList.find(p => p.name === _classifyPerson)) {
+    _classifyPerson = peopleList[0]?.name ?? null;
+    if (_classifyPerson) localStorage.setItem("classifyPerson", _classifyPerson);
   }
-  const effectiveThreshold = threshold !== null ? threshold : data.eps;
+
   const algoOptions = algorithms.map(a =>
     `<option value="${a.name}"${a.name === currentAlgo ? " selected" : ""}>${escHtml(a.label)}</option>`
   ).join("");
-
-  // Known people names, sorted, excluding special labels
-  const knownNames = people
-    .map(p => p.name)
-    .filter(n => !SPECIAL_LABELS.includes(n))
-    .sort((a, b) => a.localeCompare(b));
-
-  // JS state — start with everything deselected
-  const groups = data.groups.map(g => ({
-    ...g,
-    deselected: new Set(g.faces.map(f => `${f.md5}:${bboxToQuery(f.bbox)}`)),
-    nameEl: null,
-  }));
-  const unmatched = data.unmatched.map(f => ({ ...f, label: "" }));
+  const personOptions = peopleList.map(p =>
+    `<option value="${escHtml(p.name)}"${p.name === _classifyPerson ? " selected" : ""}>${escHtml(p.name)} (${p.face_count})</option>`
+  ).join("");
 
   const app = document.getElementById("app");
 
-  const totalPages = Math.ceil(data.total_groups / CLASSIFY_PAGE_SIZE);
-
-  // Build HTML
-  let html = `
-    <h2>Classify <span class="badge">${data.total_groups} groups</span></h2>
-    <div class="threshold-row">
-      <label>Threshold: <strong id="thresh-val">${effectiveThreshold.toFixed(2)}</strong></label>
-      <input type="range" id="thresh-slider" min="0.1" max="2.0" step="0.01" value="${effectiveThreshold}">
-      <label>Algorithm:</label>
-      <select id="algo-select">${algoOptions}</select>
-    </div>`;
-
-  if (groups.length === 0 && unmatched.length === 0) {
-    html += `<p>No classify candidates found. Run <code>scan</code> first, then label some faces.</p>`;
-    app.innerHTML = html;
+  if (!_classifyPerson) {
+    app.innerHTML = `
+      <h2>Classify</h2>
+      <p>No classify candidates found. Run <code>scan</code> first, then label some faces.</p>`;
     return;
   }
 
-  html += `<div id="classify-groups">`;
-  groups.forEach((g, gi) => {
-    // Build options; ensure the predicted person is always present
-    const optionNames = knownNames.includes(g.person)
-      ? knownNames
-      : [g.person, ...knownNames];
-    const options = [
-      `<option value="">— skip group —</option>`,
-      ...optionNames.map(n =>
-        `<option value="${escHtml(n)}"${n === g.person ? " selected" : ""}>${escHtml(n)}</option>`
-      ),
-    ].join("");
+  // Fetch candidates for the selected person
+  let data;
+  try {
+    data = await apiFetch(`/api/classify/candidates?person=${encodeURIComponent(_classifyPerson)}&${baseParams}`);
+  } catch (e) { showError(e.message); return; }
 
-    html += `
-      <div class="classify-group" data-group="${gi}">
-        <div class="classify-group-header">
-          <input type="checkbox" id="chk-all-${gi}" title="Select all">
-          <select id="name-${gi}">${options}</select>
-          <span class="dist-tag">avg dist: ${g.avg_dist.toFixed(3)}</span>
-        </div>
-        <div class="face-grid" id="grid-${gi}">
-          ${g.faces.map((f, fi) => `
-            <div class="face-cell">
-              <img src="${f.img_url}" data-group="${gi}" data-face="${fi}"
-                   class="deselected" title="${escHtml(f.photo_path)} (dist ${f.dist.toFixed(3)})"
-                   loading="lazy">
-              <a href="#/photos/${f.md5}" target="_blank" class="face-link-btn" title="Open photo">↗</a>
-              <a href="#/similar/${f.md5}/${bboxToPathParam(f.bbox)}" class="similar-link-btn" title="Find similar faces">≈</a>
-            </div>
-          `).join("")}
-        </div>
-      </div>`;
-  });
-  html += `</div>`;
+  const effectiveThreshold = threshold !== null ? threshold : data.eps;
+  const faces   = data.groups[0]?.faces    ?? [];
+  const avgDist = data.groups[0]?.avg_dist ?? null;
 
-  if (unmatched.length > 0) {
-    html += `
-      <details>
-        <summary>Unmatched faces (${unmatched.length})</summary>
-        <div id="unmatched-wrap">
-          ${unmatched.map((f, ui) => `
-            <span class="unmatched-face">
-              <img src="${f.img_url}" loading="lazy" title="${f.md5}">
-              <select data-unmatched="${ui}">
-                <option value="">— skip —</option>
-                <option value="__nonface__">Not a face</option>
-                <option value="__foreign__">Foreign</option>
-              </select>
-            </span>
-          `).join("")}
-        </div>
-      </details>`;
-  }
+  // Selection state: selected set (initially empty = none selected)
+  const selected = new Set();
 
-  if (totalPages > 1) {
-    html += `<nav class="pagination" style="margin-top:1rem;">`;
-    if (page > 1) html += `<a href="#/classify/page/${page - 1}">← Prev</a>`;
-    html += `<span>Page ${page} / ${totalPages}</span>`;
-    if (page < totalPages) html += `<a href="#/classify/page/${page + 1}">Next →</a>`;
-    html += `</nav>`;
+  let html = `
+    <h2>Classify</h2>
+    <div class="threshold-row">
+      <label>Person:</label>
+      <select id="person-select">${personOptions}</select>
+      <label>Algorithm:</label>
+      <select id="algo-select">${algoOptions}</select>
+      <label>Threshold: <strong id="thresh-val">${effectiveThreshold.toFixed(2)}</strong></label>
+      <input type="range" id="thresh-slider" min="0.1" max="2.0" step="0.01" value="${effectiveThreshold}">
+    </div>`;
+
+  if (faces.length === 0) {
+    html += `<p>No candidates for <strong>${escHtml(_classifyPerson)}</strong>.</p>`;
+  } else {
+    html += `<div style="display:flex;align-items:center;gap:0.75rem;margin:0.5rem 0;">
+      <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;margin:0;">
+        <input type="checkbox" id="select-all-classify"> Select all
+      </label>`;
+    if (avgDist !== null)
+      html += `<span class="dist-tag">avg dist: ${avgDist.toFixed(3)}</span>`;
+    html += `<span class="dist-tag">${faces.length} candidate${faces.length !== 1 ? "s" : ""}</span>
+    </div>`;
+    html += `<div class="face-grid" id="classify-grid">`;
+    faces.forEach((f, fi) => {
+      html += `
+        <div class="face-cell">
+          <img src="${f.img_url}" data-face="${fi}"
+               class="deselected" title="${escHtml(f.photo_path)} (dist ${f.dist.toFixed(3)})"
+               loading="lazy">
+          <a href="#/photos/${f.md5}" target="_blank" class="face-link-btn" title="Open photo">↗</a>
+          <a href="#/similar/${f.md5}/${bboxToPathParam(f.bbox)}" class="similar-link-btn" title="Find similar">≈</a>
+        </div>`;
+    });
+    html += `</div>`;
   }
 
   html += `
     <div class="action-row">
-      <button id="submit-labels">Submit labels</button>
+      <input type="text" id="label-input" value="${escHtml(_classifyPerson)}"
+             placeholder="Label to assign" style="flex:1;min-width:150px;margin:0;">
+      <button id="submit-labels">Submit selected</button>
       <button id="mark-nonface" class="secondary outline">Not a face</button>
       <button id="mark-foreign"  class="secondary outline">Foreign</button>
     </div>`;
   app.innerHTML = html;
 
+  // Person selector
+  document.getElementById("person-select").addEventListener("change", e => {
+    renderClassify(effectiveThreshold, null, e.target.value);
+  });
+
   // Algorithm selector
   document.getElementById("algo-select").addEventListener("change", e => {
-    renderClassify(1, effectiveThreshold, e.target.value);
+    renderClassify(effectiveThreshold, e.target.value);
   });
 
   // Threshold slider
@@ -314,160 +293,93 @@ async function renderClassify(page = 1, threshold = null, algo = null) {
   document.getElementById("thresh-slider").addEventListener("input", e => {
     document.getElementById("thresh-val").textContent = parseFloat(e.target.value).toFixed(2);
     clearTimeout(threshTimer);
-    threshTimer = setTimeout(() => renderClassify(1, parseFloat(e.target.value), currentAlgo), 400);
+    threshTimer = setTimeout(() => renderClassify(parseFloat(e.target.value)), 400);
   });
 
-  // Store name input back-refs
-  groups.forEach((g, gi) => { g.nameEl = document.getElementById(`name-${gi}`); });
+  function _updateSelectAllCheckbox() {
+    const cb = document.getElementById("select-all-classify");
+    if (!cb) return;
+    if (selected.size === 0)             { cb.checked = false; cb.indeterminate = false; }
+    else if (selected.size === faces.length) { cb.checked = true;  cb.indeterminate = false; }
+    else                                 { cb.checked = false; cb.indeterminate = true;  }
+  }
 
-  // Checkbox/thumbnail logic
-  function refreshGroupCheckbox(gi) {
-    const g = groups[gi];
-    const chk = document.getElementById(`chk-all-${gi}`);
-    const total = g.faces.length;
-    const deselCount = g.deselected.size;
-    if (deselCount === 0) {
-      chk.checked = true;
-      chk.indeterminate = false;
-    } else if (deselCount === total) {
-      chk.checked = false;
-      chk.indeterminate = false;
-    } else {
-      chk.checked = false;
-      chk.indeterminate = true;
-    }
+  // Select-all checkbox
+  const cbAll = document.getElementById("select-all-classify");
+  if (cbAll) {
+    cbAll.addEventListener("change", e => {
+      const imgs = app.querySelectorAll(".face-grid img");
+      if (e.target.checked) {
+        faces.forEach(f => selected.add(`${f.md5}:${bboxToQuery(f.bbox)}`));
+        imgs.forEach(img => { img.className = "selected"; });
+      } else {
+        selected.clear();
+        imgs.forEach(img => { img.className = "deselected"; });
+      }
+    });
   }
 
   // Face thumbnail click → toggle selection
   app.querySelectorAll(".face-grid img").forEach(img => {
     img.addEventListener("click", () => {
-      const gi = parseInt(img.dataset.group, 10);
-      const fi = parseInt(img.dataset.face, 10);
-      const g = groups[gi];
-      const key = `${g.faces[fi].md5}:${bboxToQuery(g.faces[fi].bbox)}`;
-      if (g.deselected.has(key)) {
-        g.deselected.delete(key);
-        img.className = "selected";
-      } else {
-        g.deselected.add(key);
-        img.className = "deselected";
-      }
-      refreshGroupCheckbox(gi);
+      const fi  = parseInt(img.dataset.face, 10);
+      const key = `${faces[fi].md5}:${bboxToQuery(faces[fi].bbox)}`;
+      if (selected.has(key)) { selected.delete(key); img.className = "deselected"; }
+      else                   { selected.add(key);    img.className = "selected"; }
+      _updateSelectAllCheckbox();
     });
   });
 
-  // Select-all checkbox
-  app.querySelectorAll("[id^='chk-all-']").forEach(chk => {
-    chk.addEventListener("change", () => {
-      const gi = parseInt(chk.id.replace("chk-all-", ""), 10);
-      const g = groups[gi];
-      const grid = document.getElementById(`grid-${gi}`);
-      if (chk.checked) {
-        g.deselected.clear();
-        grid.querySelectorAll("img").forEach(img => img.className = "selected");
-      } else {
-        g.faces.forEach((f, fi) => {
-          const key = `${f.md5}:${bboxToQuery(f.bbox)}`;
-          g.deselected.add(key);
-          grid.querySelectorAll("img")[fi].className = "deselected";
-        });
-      }
-    });
-  });
-
-  // Unmatched selects
-  app.querySelectorAll("[data-unmatched]").forEach(sel => {
-    sel.addEventListener("change", () => {
-      const ui = parseInt(sel.dataset.unmatched, 10);
-      unmatched[ui].label = sel.value;
-    });
-  });
-
-  // Special-label buttons (classify view)
-  async function applySpecialLabelClassify(name) {
-    const items = [];
-    groups.forEach(g => {
-      g.faces.forEach(f => {
-        const key = `${f.md5}:${bboxToQuery(f.bbox)}`;
-        if (!g.deselected.has(key)) items.push({ md5: f.md5, bbox: f.bbox, name });
-      });
-    });
-    if (items.length === 0) { alert("Select at least one face first."); return; }
+  // Submit helper — labels all selected faces with the given name
+  async function submitWith(name) {
+    const items = faces
+      .filter(f => selected.has(`${f.md5}:${bboxToQuery(f.bbox)}`))
+      .map(f => ({ md5: f.md5, bbox: f.bbox, name }));
+    if (items.length === 0) { alert("No faces selected."); return; }
+    const btn   = document.getElementById("submit-labels");
     const btnNF = document.getElementById("mark-nonface");
     const btnFR = document.getElementById("mark-foreign");
-    btnNF.disabled = true;
-    btnFR.disabled = true;
-    try {
-      await apiPost("/api/classify/labels", items);
-      setTimeout(() => renderClassify(page, effectiveThreshold, currentAlgo), 1500);
-    } catch (e) {
-      btnNF.disabled = false;
-      btnFR.disabled = false;
-      showError(e.message);
-    }
-  }
-  document.getElementById("mark-nonface").addEventListener("click", () => applySpecialLabelClassify("__nonface__"));
-  document.getElementById("mark-foreign" ).addEventListener("click", () => applySpecialLabelClassify("__foreign__"));
-
-  // Submit
-  document.getElementById("submit-labels").addEventListener("click", async () => {
-    const items = [];
-    groups.forEach(g => {
-      const name = g.nameEl.value.trim();
-      if (!name) return;
-      g.faces.forEach(f => {
-        const key = `${f.md5}:${bboxToQuery(f.bbox)}`;
-        if (!g.deselected.has(key)) {
-          items.push({ md5: f.md5, bbox: f.bbox, name });
-        }
-      });
-    });
-    unmatched.forEach(f => {
-      if (f.label) items.push({ md5: f.md5, bbox: f.bbox, name: f.label });
-    });
-
-    if (items.length === 0) {
-      alert("Nothing to submit. Enter a name for at least one group.");
-      return;
-    }
-
-    const btn = document.getElementById("submit-labels");
-    btn.disabled = true;
+    btn.disabled = btnNF.disabled = btnFR.disabled = true;
     btn.textContent = "Submitting…";
     try {
       const resp = await apiPost("/api/classify/labels", items);
       btn.textContent = `Done — ${resp.labeled} labeled`;
-      setTimeout(() => renderClassify(page, effectiveThreshold, currentAlgo), 1500);
+      setTimeout(() => renderClassify(effectiveThreshold), 1500);
     } catch (e) {
-      btn.disabled = false;
-      btn.textContent = "Submit labels";
+      btn.disabled = btnNF.disabled = btnFR.disabled = false;
+      btn.textContent = "Submit selected";
       showError(e.message);
     }
-  });
+  }
 
-  const rectCleanups = [];
-  app.querySelectorAll(".face-grid").forEach(grid => {
-    rectCleanups.push(attachRectSelect(grid, (imgs, mode) => {
+  document.getElementById("submit-labels").addEventListener("click", () => {
+    const label = document.getElementById("label-input").value.trim();
+    if (!label) { alert("Enter a label to assign."); return; }
+    submitWith(label);
+  });
+  document.getElementById("mark-nonface").addEventListener("click", () => submitWith("__nonface__"));
+  document.getElementById("mark-foreign" ).addEventListener("click", () => submitWith("__foreign__"));
+
+  // Rect-select
+  const grid = document.getElementById("classify-grid");
+  if (grid) {
+    _cleanup = attachRectSelect(grid, (imgs, mode) => {
       imgs.forEach(img => {
-        const gi = parseInt(img.dataset.group, 10);
-        const fi = parseInt(img.dataset.face,  10);
-        if (isNaN(gi) || isNaN(fi)) return;
-        const g = groups[gi];
-        const key = `${g.faces[fi].md5}:${bboxToQuery(g.faces[fi].bbox)}`;
+        const fi  = parseInt(img.dataset.face, 10);
+        if (isNaN(fi)) return;
+        const key = `${faces[fi].md5}:${bboxToQuery(faces[fi].bbox)}`;
         if (mode === "deselect") {
-          g.deselected.add(key);    img.className = "deselected";
+          selected.delete(key); img.className = "deselected";
         } else if (mode === "invert") {
-          if (g.deselected.has(key)) { g.deselected.delete(key); img.className = "selected"; }
-          else                       { g.deselected.add(key);    img.className = "deselected"; }
+          if (selected.has(key)) { selected.delete(key); img.className = "deselected"; }
+          else                   { selected.add(key);    img.className = "selected"; }
         } else {
-          g.deselected.delete(key); img.className = "selected";
+          selected.add(key); img.className = "selected";
         }
       });
-      const gis = new Set(imgs.map(img => parseInt(img.dataset.group, 10)).filter(n => !isNaN(n)));
-      gis.forEach(gi => refreshGroupCheckbox(gi));
-    }));
-  });
-  _cleanup = () => rectCleanups.forEach(fn => fn());
+      _updateSelectAllCheckbox();
+    });
+  }
 }
 
 
