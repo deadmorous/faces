@@ -984,6 +984,10 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = true, maxDist = nul
     try {
       const resp = await apiPost("/api/classify/labels", items);
       btn.textContent = `Done — ${resp.labeled} labeled`;
+      if (label && !SPECIAL_LABELS.includes(label)) {
+        _classifyPerson = label;
+        localStorage.setItem("classifyPerson", label);
+      }
       setTimeout(() => renderSimilar(md5, bboxParam, unlabeledOnly, effectiveMaxDist), 1500);
     } catch (e) {
       btn.disabled = false;
