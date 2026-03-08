@@ -254,7 +254,8 @@ async function renderClassify(threshold = null, algo = null, person = null) {
   const algoOptions = algorithms.map(a =>
     `<option value="${a.name}"${a.name === currentAlgo ? " selected" : ""}>${escHtml(a.label)}</option>`
   ).join("");
-  const personOptions = peopleList.map(p =>
+  const sortedPeople = [...peopleList].sort((a, b) => a.name.localeCompare(b.name, undefined, {sensitivity: "base"}));
+  const personOptions = sortedPeople.map(p =>
     `<option value="${escHtml(p.name)}"${p.name === _classifyPerson ? " selected" : ""}>${escHtml(p.name)} (${p.face_count})</option>`
   ).join("");
 
