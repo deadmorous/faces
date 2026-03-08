@@ -17,7 +17,23 @@
       <li><a href="#/people" data-nav="people">People</a></li>
     </ul>
   </nav>
-  <main id="app" class="container"></main>
+  <div class="app-layout container-fluid">
+    <aside id="sidebar">
+      <div class="sidebar-group hidden" id="sb-group-threshold">
+        <label>Threshold: <strong id="sb-thresh-val">1.00</strong></label>
+        <input type="range" id="sb-thresh" min="0.1" max="2.0" step="0.01">
+      </div>
+      <div class="sidebar-group hidden" id="sb-group-relsize">
+        <label>Rel. size ≥ <strong id="sb-rel-size-val">0.00</strong></label>
+        <input type="range" id="sb-rel-size" min="0.0" max="1.0" step="0.05">
+      </div>
+      <div class="sidebar-group hidden" id="sb-group-algo">
+        <label>Algorithm</label>
+        <select id="sb-algo"></select>
+      </div>
+    </aside>
+    <main id="app"></main>
+  </div>
   <script src="app.js"></script>
 </body>
 </html>
