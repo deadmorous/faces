@@ -176,7 +176,7 @@ def rename_person(
             row["name"] = new_name
 
     # Invalidate classify cache — labeled/unlabeled split has changed
-    request.app.state.classify_cache = {"key": None, "result": None}
+    request.app.state.data_generation += 1
 
     return PersonRenameResponse(updated=count, new_name=new_name)
 

@@ -176,22 +176,29 @@ window.addEventListener("DOMContentLoaded", route);
 // View: Classify
 // ---------------------------------------------------------------------------
 const CLASSIFY_PAGE_SIZE = 10;
+let _classifyAlgo = "min_dist";  // persists across page navigations
 
-async function renderClassify(page = 1, threshold = null) {
+async function renderClassify(page = 1, threshold = null, algo = null) {
+  if (algo !== null) _classifyAlgo = algo;
+  const currentAlgo = _classifyAlgo;
   showSpinner();
-  let data, people;
+  let data, people, algorithms;
   try {
     // effectiveThreshold is the Euclidean eps; API expects cosine threshold = 1 - eps²/2
     const threshParam = threshold !== null ? `&threshold=${1 - threshold * threshold / 2}` : "";
-    [data, people] = await Promise.all([
-      apiFetch(`/api/classify/candidates?min_size=3&page=${page}&page_size=${CLASSIFY_PAGE_SIZE}${threshParam}`),
+    [data, people, algorithms] = await Promise.all([
+      apiFetch(`/api/classify/candidates?min_size=3&page=${page}&page_size=${CLASSIFY_PAGE_SIZE}${threshParam}&algo=${currentAlgo}`),
       apiFetch("/api/people"),
+      apiFetch("/api/classify/algorithms"),
     ]);
   } catch (e) {
     showError(e.message);
     return;
   }
   const effectiveThreshold = threshold !== null ? threshold : data.eps;
+  const algoOptions = algorithms.map(a =>
+    `<option value="${a.name}"${a.name === currentAlgo ? " selected" : ""}>${escHtml(a.label)}</option>`
+  ).join("");
 
   // Known people names, sorted, excluding special labels
   const knownNames = people
@@ -217,6 +224,8 @@ async function renderClassify(page = 1, threshold = null) {
     <div class="threshold-row">
       <label>Threshold: <strong id="thresh-val">${effectiveThreshold.toFixed(2)}</strong></label>
       <input type="range" id="thresh-slider" min="0.1" max="2.0" step="0.01" value="${effectiveThreshold}">
+      <label>Algorithm:</label>
+      <select id="algo-select">${algoOptions}</select>
     </div>`;
 
   if (groups.length === 0 && unmatched.length === 0) {
@@ -295,12 +304,17 @@ async function renderClassify(page = 1, threshold = null) {
     </div>`;
   app.innerHTML = html;
 
+  // Algorithm selector
+  document.getElementById("algo-select").addEventListener("change", e => {
+    renderClassify(1, effectiveThreshold, e.target.value);
+  });
+
   // Threshold slider
   let threshTimer;
   document.getElementById("thresh-slider").addEventListener("input", e => {
     document.getElementById("thresh-val").textContent = parseFloat(e.target.value).toFixed(2);
     clearTimeout(threshTimer);
-    threshTimer = setTimeout(() => renderClassify(1, parseFloat(e.target.value)), 400);
+    threshTimer = setTimeout(() => renderClassify(1, parseFloat(e.target.value), currentAlgo), 400);
   });
 
   // Store name input back-refs
@@ -385,7 +399,7 @@ async function renderClassify(page = 1, threshold = null) {
     btnFR.disabled = true;
     try {
       await apiPost("/api/classify/labels", items);
-      setTimeout(() => renderClassify(page, effectiveThreshold), 1500);
+      setTimeout(() => renderClassify(page, effectiveThreshold, currentAlgo), 1500);
     } catch (e) {
       btnNF.disabled = false;
       btnFR.disabled = false;
@@ -423,7 +437,7 @@ async function renderClassify(page = 1, threshold = null) {
     try {
       const resp = await apiPost("/api/classify/labels", items);
       btn.textContent = `Done — ${resp.labeled} labeled`;
-      setTimeout(() => renderClassify(page, effectiveThreshold), 1500);
+      setTimeout(() => renderClassify(page, effectiveThreshold, currentAlgo), 1500);
     } catch (e) {
       btn.disabled = false;
       btn.textContent = "Submit labels";

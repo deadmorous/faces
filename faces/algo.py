@@ -1,7 +1,8 @@
-"""Shared algorithmic functions for classify and clusterize, reused by CLI and web."""
+"""Shared algorithmic functions for classify, reused by CLI and web."""
 
 import math
 from collections import defaultdict
+from typing import Callable
 
 import numpy as np
 
@@ -10,6 +11,57 @@ from .db import (
     load_all_embeddings, load_photo_dates, parse_date,
 )
 from .timing import timed
+
+# ---------------------------------------------------------------------------
+# Per-algorithm compute kernels
+# Signature: (unlabeled_X, labeled_X, person_names, person_col_map)
+#            -> (best_person_idx, best_dist)  both shape (n_unlabeled,)
+# ---------------------------------------------------------------------------
+
+def _algo_min_dist(
+    unlabeled_X: np.ndarray,
+    labeled_X: np.ndarray,
+    person_names: list[str],
+    person_col_map: dict[str, list[int]],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Nearest labeled face per person (exact min-distance)."""
+    from scipy.spatial.distance import cdist
+    D = cdist(unlabeled_X, labeled_X, metric="euclidean")
+    per_person = np.stack(
+        [D[:, person_col_map[n]].min(axis=1) for n in person_names], axis=1
+    )
+    best_idx = per_person.argmin(axis=1)
+    best_dist = per_person[np.arange(len(unlabeled_X)), best_idx]
+    return best_idx, best_dist
+
+
+def _algo_centroid(
+    unlabeled_X: np.ndarray,
+    labeled_X: np.ndarray,
+    person_names: list[str],
+    person_col_map: dict[str, list[int]],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Distance to per-person centroid (mean of all labeled embeddings)."""
+    from scipy.spatial.distance import cdist
+    centroids = np.stack(
+        [labeled_X[person_col_map[n]].mean(axis=0) for n in person_names]
+    )
+    D = cdist(unlabeled_X, centroids, metric="euclidean")
+    best_idx = D.argmin(axis=1)
+    best_dist = D[np.arange(len(unlabeled_X)), best_idx]
+    return best_idx, best_dist
+
+
+# Registry: name -> (display_label, kernel_fn)
+_AlgoKernel = Callable[
+    [np.ndarray, np.ndarray, list[str], dict[str, list[int]]],
+    tuple[np.ndarray, np.ndarray],
+]
+ALGORITHMS: dict[str, tuple[str, _AlgoKernel]] = {
+    "min_dist": ("Min distance", _algo_min_dist),
+    "centroid":  ("Centroid",     _algo_centroid),
+}
+DEFAULT_ALGO = "min_dist"
 
 
 def classify_candidates(
@@ -20,6 +72,7 @@ def classify_candidates(
     until: str | None = None,
     rows: list[dict] | None = None,
     X: np.ndarray | None = None,
+    algo: str = DEFAULT_ALGO,
 ) -> dict:
     """Run single-linkage classify logic and return grouped candidates.
 
@@ -107,22 +160,17 @@ def classify_candidates(
         for name in person_names
     }
 
-    from scipy.spatial.distance import cdist
+    if algo not in ALGORITHMS:
+        raise ValueError(f"Unknown algorithm {algo!r}")
+    _, algo_fn = ALGORITHMS[algo]
 
     unlabeled_X = X[unlabeled_indices]
     n_unlabeled = len(unlabeled_indices)
     n_labeled = len(all_labeled_idx)
     n_persons = len(person_names)
-    with timed(f"classify_candidates: cdist ({n_unlabeled} unlabeled × {n_labeled} labeled, {n_persons} persons)"):
-        D = cdist(unlabeled_X, labeled_X, metric="euclidean")
-
-        per_person = np.stack(
-            [D[:, person_col_map[name]].min(axis=1) for name in person_names],
-            axis=1,
-        )
-
-        best_idx = per_person.argmin(axis=1)
-        best_dist = per_person[np.arange(n_unlabeled), best_idx]
+    with timed(f"classify_candidates [{algo}]: compute "
+               f"({n_unlabeled} unlabeled × {n_labeled} labeled, {n_persons} persons)"):
+        best_idx, best_dist = algo_fn(unlabeled_X, labeled_X, person_names, person_col_map)
 
     candidate_mask = best_dist < eps
 

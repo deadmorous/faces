@@ -37,7 +37,8 @@ async def lifespan(app: FastAPI):
     app.state.cfg = cfg
     app.state.db = db
     app.state.people_cache = build_people_cache(db)
-    app.state.classify_cache = {"key": None, "result": None}
+    app.state.data_generation = 0
+    app.state.classify_cache = {"generation": -1, "key": None, "result": None}
     rows, X = load_all_embeddings(db)
     index = {(r["md5"], tuple(r["bbox"])): i for i, r in enumerate(rows)}
     app.state.embeddings_cache = {"rows": rows, "X": X, "index": index}

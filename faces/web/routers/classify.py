@@ -10,13 +10,19 @@ from ..models import (
     ClassifyCandidates, ClassifyFace, ClassifyGroup,
     ClassifyLabelsResponse, FaceLabelItem, UnmatchedFace,
 )
-from ...algo import classify_candidates
+from ...algo import ALGORITHMS, DEFAULT_ALGO, classify_candidates
 from ...config import Config
 from ...db import Database
 from ...timing import timed
 from .people import people_cache_to_list
 
 router = APIRouter(prefix="/api/classify", tags=["classify"])
+
+
+@router.get("/algorithms", summary="List available classification algorithms")
+def list_algorithms():
+    """Return algorithm names and display labels in registry order."""
+    return [{"name": n, "label": lbl} for n, (lbl, _) in ALGORITHMS.items()]
 
 
 def _face_img_url(md5: str, bbox: list[int]) -> str:
@@ -44,26 +50,30 @@ def get_candidates(
     page_size: int = 10,
     since: Optional[str] = None,
     until: Optional[str] = None,
+    algo: str = DEFAULT_ALGO,
     db: Annotated[Database, Depends(get_db)] = ...,
     cfg: Annotated[Config, Depends(get_cfg)] = ...,
 ):
-    """Run single-linkage classify logic and return candidates grouped by person.
+    """Run classification and return candidates grouped by person.
 
     Groups are sorted by avg_dist ascending (most confident first).
     Unmatched faces (beyond eps) are included for foreign/non-face marking.
-    The full candidate list is cached in app.state keyed by (threshold, min_size,
-    since, until); page navigation is served from cache without recomputing.
+    The full candidate list is cached keyed by (algo, threshold, min_size, since, until)
+    and a data_generation counter; page navigation is served from cache.
     """
+    if algo not in ALGORITHMS:
+        raise HTTPException(status_code=422, detail=f"Unknown algorithm {algo!r}")
     effective_threshold = threshold if threshold is not None else cfg.cluster_threshold
-    cache_key = (effective_threshold, min_size, since, until)
+    cache_key = (algo, effective_threshold, min_size, since, until)
     cached = request.app.state.classify_cache
+    generation = request.app.state.data_generation
 
-    if cached["key"] == cache_key and cached["result"] is not None:
+    if cached["generation"] == generation and cached["key"] == cache_key:
         result = cached["result"]
     else:
         emb = request.app.state.embeddings_cache
         try:
-            with timed("GET /api/classify/candidates: classify_candidates (cache miss)"):
+            with timed(f"GET /api/classify/candidates [{algo}]: classify_candidates (cache miss)"):
                 result = classify_candidates(
                     db=db,
                     threshold=effective_threshold,
@@ -72,10 +82,11 @@ def get_candidates(
                     until=until,
                     rows=emb["rows"],
                     X=emb["X"],
+                    algo=algo,
                 )
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
-        request.app.state.classify_cache = {"key": cache_key, "result": result}
+        request.app.state.classify_cache = {"generation": generation, "key": cache_key, "result": result}
 
     # Enrich with URLs — build photo path cache to avoid repeated lookups
     path_cache: dict[str, str] = {}
@@ -177,5 +188,5 @@ def submit_labels(
         if key in emb_index:
             emb_rows[emb_index[key]]["name"] = item.name
 
-    request.app.state.classify_cache = {"key": None, "result": None}
+    request.app.state.data_generation += 1
     return ClassifyLabelsResponse(labeled=len(items))
