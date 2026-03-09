@@ -1,5 +1,6 @@
 """/api/photos — paginated photo list and per-photo detail."""
 
+from collections import defaultdict
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -21,10 +22,15 @@ def _read_exif_orientation(path: Path) -> int:
         return 1
 
 
+VALID_SORTS = {"date_asc", "path_asc"}
+
+
 @router.get("", response_model=PhotoList, summary="Paginated photo list")
 def list_photos(
     since: Optional[str] = None,
     until: Optional[str] = None,
+    labels: Optional[str] = None,
+    sort: str = "date_asc",
     page: int = 1,
     page_size: int = 50,
     db: Annotated[Database, Depends(get_db)] = ...,
@@ -53,7 +59,23 @@ def list_photos(
             filtered.append(row)
         all_rows = filtered
 
-    all_rows.sort(key=lambda r: r.get("exif_date") or 0, reverse=True)
+    # Label filter: only keep photos that have all required person labels
+    required_labels = [l.strip() for l in labels.split(",") if l.strip()] if labels else []
+    if required_labels:
+        face_rows = db.faces.search().limit(10_000_000).to_list()
+        md5_label_sets: dict[str, set] = defaultdict(set)
+        for r in face_rows:
+            if r.get("name"):
+                md5_label_sets[r["md5"]].add(r["name"])
+        required = set(required_labels)
+        all_rows = [r for r in all_rows if required.issubset(md5_label_sets.get(r["md5"], set()))]
+
+    if sort not in VALID_SORTS:
+        sort = "date_asc"
+    if sort == "path_asc":
+        all_rows.sort(key=lambda r: r.get("path") or "")
+    else:  # date_asc
+        all_rows.sort(key=lambda r: r.get("exif_date") or 0)
 
     total = len(all_rows)
     start = (page - 1) * page_size

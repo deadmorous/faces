@@ -40,6 +40,22 @@
           <input type="number" id="sb-date-to" placeholder="To" min="1900" max="2100">
         </div>
       </div>
+      <div class="sidebar-group hidden" id="sb-group-faces">
+        <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;margin:0;">
+          <input type="checkbox" id="sb-show-faces"> Show faces
+        </label>
+      </div>
+      <div class="sidebar-group hidden" id="sb-group-labels">
+        <label>Show photos with</label>
+        <input type="text" id="sb-labels" placeholder="Alice, Bob" autocomplete="off">
+      </div>
+      <div class="sidebar-group hidden" id="sb-group-sort">
+        <label>Sort by</label>
+        <select id="sb-sort">
+          <option value="date_asc">Date</option>
+          <option value="path_asc">Path</option>
+        </select>
+      </div>
       <div class="sidebar-group hidden" id="sb-group-refrange">
         <label>Reference range</label>
         <div class="year-range">

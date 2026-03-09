@@ -14,10 +14,42 @@ const _params = {
   dateTo:      localStorage.getItem("sb_dateTo")      || "",
   refDateFrom: localStorage.getItem("sb_refDateFrom") || "",
   refDateTo:   localStorage.getItem("sb_refDateTo")   || "",
+  photoLabels: localStorage.getItem("sb_photoLabels") || "",
+  photoSort:   localStorage.getItem("sb_photoSort")   || "date_asc",
+  showFaces:   localStorage.getItem("sb_showFaces") === "true",
 };
 let _currentView     = null;   // "unlabeled" | "classify" | "similar" | ...
 let _currentViewArgs = {};     // per-view re-render args
 let _algorithms      = null;   // cached from /api/classify/algorithms
+
+// Gallery state
+let _photosList = [];
+let _galleryKeyHandler = null;
+let _galleryResizeHandler = null;
+let _galleryResizeTimer = null;
+let _injectBboxOverlays = null;
+const THUMB_PAGE_SIZE = 50;
+
+function _galleryCleanupListeners() {
+  if (_galleryKeyHandler)    { document.removeEventListener("keydown", _galleryKeyHandler); _galleryKeyHandler = null; }
+  if (_galleryResizeHandler) { window.removeEventListener("resize", _galleryResizeHandler); _galleryResizeHandler = null; }
+  clearTimeout(_galleryResizeTimer);
+  _injectBboxOverlays = null;
+}
+
+function _findFallbackIdx(photos) {
+  const sort = _params.photoSort;
+  const date = _currentViewArgs.currentExifDate;
+  const path = _currentViewArgs.currentPath;
+  if (!photos.length) return 0;
+  let best = -1;
+  for (let i = 0; i < photos.length; i++) {
+    const d = photos[i].exif_date, p = photos[i].path;
+    if      (sort === "date_asc" && d != null && d < date) best = i;
+    else if (sort === "path_asc" && p != null && p < path) best = i;
+  }
+  return best >= 0 ? best : 0;
+}
 
 // ---------------------------------------------------------------------------
 // API helpers
@@ -80,6 +112,12 @@ function refDateQs() {
 }
 function appendQs(base, qs) {
   return qs ? `${base}&${qs}` : base;
+}
+function _photosFilterQs() {
+  const parts = [dateQs(), `sort=${_params.photoSort}`];
+  if (_params.photoLabels.trim())
+    parts.push(`labels=${encodeURIComponent(_params.photoLabels.trim())}`);
+  return parts.filter(Boolean).join("&");
 }
 
 // Attach rubber-band rectangular selection to a face grid.
@@ -163,10 +201,16 @@ function setSidebarView(view) {
   const showAlgo       = view === "classify";
   const showDateRange  = ["unlabeled", "classify", "similar", "photos", "personDetail", "personFaces"].includes(view);
   const showRefRange   = view === "classify";
+  const showFaces      = view === "photos";
+  const showLabels     = view === "photos";
+  const showSort       = view === "photos";
   document.getElementById("sb-group-threshold").classList.toggle("hidden", !showThresh);
   document.getElementById("sb-group-relsize")  .classList.toggle("hidden", !showRelSize);
   document.getElementById("sb-group-algo")     .classList.toggle("hidden", !showAlgo);
   document.getElementById("sb-group-daterange").classList.toggle("hidden", !showDateRange);
+  document.getElementById("sb-group-faces")    .classList.toggle("hidden", !showFaces);
+  document.getElementById("sb-group-labels")   .classList.toggle("hidden", !showLabels);
+  document.getElementById("sb-group-sort")     .classList.toggle("hidden", !showSort);
   document.getElementById("sb-group-refrange") .classList.toggle("hidden", !showRefRange);
 }
 
@@ -177,7 +221,7 @@ function rerenderCurrentView() {
     case "similar":      renderSimilar(
       _currentViewArgs.md5, _currentViewArgs.bboxParam,
       _currentViewArgs.unlabeledOnly); break;
-    case "photos":       renderPhotos(_currentViewArgs.page || 1); break;
+    case "photos":       renderPhotos(); break;
     case "personDetail": renderPersonDetail(_currentViewArgs.name, _currentViewArgs.page || 1); break;
     case "personFaces":  renderPersonFaces(_currentViewArgs.name, _currentViewArgs.page || 1); break;
   }
@@ -246,6 +290,38 @@ function initSidebar() {
     rerenderCurrentView();
   });
 
+  // Show-faces checkbox for photos view
+  const sbShowFaces = document.getElementById("sb-show-faces");
+  sbShowFaces.checked = _params.showFaces;
+  sbShowFaces.addEventListener("change", e => {
+    _params.showFaces = e.target.checked;
+    localStorage.setItem("sb_showFaces", _params.showFaces);
+    // Toggle overlays without re-fetching
+    if (_params.showFaces) {
+      if (_injectBboxOverlays) _injectBboxOverlays();
+    } else {
+      document.getElementById("photo-wrap")
+        ?.querySelectorAll(".bbox-overlay").forEach(el => el.remove());
+    }
+  });
+
+  // Labels and sort for photos view
+  const sbLabels = document.getElementById("sb-labels");
+  const sbSort   = document.getElementById("sb-sort");
+  sbLabels.value = _params.photoLabels;
+  sbSort.value   = _params.photoSort;
+
+  sbLabels.addEventListener("change", e => {
+    _params.photoLabels = e.target.value.trim();
+    localStorage.setItem("sb_photoLabels", _params.photoLabels);
+    rerenderCurrentView();
+  });
+  sbSort.addEventListener("change", e => {
+    _params.photoSort = e.target.value;
+    localStorage.setItem("sb_photoSort", _params.photoSort);
+    rerenderCurrentView();
+  });
+
   // Fetch DB date coverage hint
   apiFetch("/api/photos/date_coverage").then(d => {
     const hint = document.getElementById("sb-date-coverage");
@@ -283,18 +359,12 @@ function route() {
       renderClassify();
       break;
     case "photos":
-      if (parts[1] === "page") {
-        _currentView = "photos"; _currentViewArgs = { page: parseInt(parts[2], 10) || 1 };
-        setSidebarView("photos");
-        renderPhotos(_currentViewArgs.page);
-      } else if (parts[1]) {
-        _currentView = null; _currentViewArgs = {};   // photo detail — no date re-render
-        setSidebarView("photoDetail");
-        renderPhotoDetail(parts[1]);
+      _currentView = "photos";
+      setSidebarView("photos");
+      if (parts[1] && parts[1] !== "page") {
+        renderPhotos(parts[1]);   // md5 specified
       } else {
-        _currentView = "photos"; _currentViewArgs = { page: 1 };
-        setSidebarView("photos");
-        renderPhotos(1);
+        renderPhotos();           // auto-select from state or first
       }
       break;
     case "people":
@@ -585,108 +655,144 @@ async function renderClassify(person = null) {
 
 
 // ---------------------------------------------------------------------------
-// View: Photos (paginated)
+// View: Photos (gallery)
 // ---------------------------------------------------------------------------
-const PAGE_SIZE = 50;
-
-async function renderPhotos(page) {
+async function renderPhotos(currentMd5 = null) {
+  if (currentMd5) {
+    // Navigated here from a face ↗ link — auto-show faces
+    _params.showFaces = true;
+    localStorage.setItem("sb_showFaces", "true");
+    document.getElementById("sb-show-faces").checked = true;
+  }
   showSpinner();
+  _galleryCleanupListeners();
   let data;
   try {
-    data = await apiFetch(appendQs(`/api/photos?page=${page}&page_size=${PAGE_SIZE}`, dateQs()));
-  } catch (e) {
-    showError(e.message);
+    data = await apiFetch(`/api/photos?page=1&page_size=100000&${_photosFilterQs()}`);
+  } catch (e) { showError(e.message); return; }
+
+  _photosList = data.photos;
+
+  if (_photosList.length === 0) {
+    document.getElementById("app").innerHTML = `<h2>Photos</h2><p>No photos match the current filter.</p>`;
     return;
   }
 
-  const app = document.getElementById("app");
-  const totalPages = Math.ceil(data.total / PAGE_SIZE);
+  let idx = 0;
+  if (currentMd5) {
+    let found = _photosList.findIndex(p => p.md5 === currentMd5);
+    if (found < 0 && _params.photoLabels) {
+      // Target photo doesn't pass label filter — clear it and refetch
+      _params.photoLabels = "";
+      localStorage.setItem("sb_photoLabels", "");
+      document.getElementById("sb-labels").value = "";
+      try {
+        data = await apiFetch(`/api/photos?page=1&page_size=100000&${_photosFilterQs()}`);
+      } catch (e) { showError(e.message); return; }
+      _photosList = data.photos;
+      found = _photosList.findIndex(p => p.md5 === currentMd5);
+    }
+    idx = found >= 0 ? found : _findFallbackIdx(_photosList);
+  } else if (_currentViewArgs.currentMd5) {
+    const found = _photosList.findIndex(p => p.md5 === _currentViewArgs.currentMd5);
+    idx = found >= 0 ? found : _findFallbackIdx(_photosList);
+  }
 
-  let html = `<h2>Photos <span class="badge">${data.total}</span></h2>`;
-  html += `<ul class="photo-list">`;
-  data.photos.forEach(p => {
-    html += `
-      <li class="photo-list-item" data-md5="${p.md5}">
-        <img src="${p.photo_url}" loading="lazy" alt="" width="80" height="60">
-        <div class="photo-meta">
-          <div class="photo-path">${escHtml(p.path)}</div>
-          <div class="photo-info">${formatDate(p.exif_date)} · ${p.face_count} face${p.face_count !== 1 ? "s" : ""}</div>
-        </div>
-      </li>`;
-  });
-  html += `</ul>`;
+  await _loadPhotoAtIdx(idx);
+}
 
-  if (totalPages > 1) {
-    html += `<nav class="pagination">`;
-    if (page > 1) html += `<a href="#/photos/page/${page - 1}">← Prev</a>`;
-    html += `<span>Page ${page} / ${totalPages}</span>`;
-    if (page < totalPages) html += `<a href="#/photos/page/${page + 1}">Next →</a>`;
+async function _loadPhotoAtIdx(idx) {
+  if (idx < 0) idx = 0;
+  if (idx >= _photosList.length) idx = _photosList.length - 1;
+  const photo = _photosList[idx];
+  _currentViewArgs.currentMd5      = photo.md5;
+  _currentViewArgs.currentExifDate = photo.exif_date;
+  _currentViewArgs.currentPath     = photo.path;
+  _currentViewArgs.currentIdx      = idx;
+  history.replaceState(null, "", `#/photos/${photo.md5}`);
+  let detail;
+  try {
+    detail = await apiFetch(`/api/photos/${photo.md5}`);
+  } catch (e) { showError(e.message); return; }
+  _renderPhotosGallery(idx, detail);
+}
+
+function _renderPhotosGallery(currentIdx, detail) {
+  _galleryCleanupListeners();
+  const n = _photosList.length;
+  const thumbPage      = Math.floor(currentIdx / THUMB_PAGE_SIZE);
+  const thumbStart     = thumbPage * THUMB_PAGE_SIZE;
+  const thumbEnd       = Math.min(thumbStart + THUMB_PAGE_SIZE, n);
+  const totalThumbPages = Math.ceil(n / THUMB_PAGE_SIZE);
+
+  const uniqueLabels = [...new Set(
+    detail.faces
+      .map(f => f.sticky_name)
+      .filter(n => n && !["__nonface__", "__foreign__"].includes(n))
+  )];
+  const labelsStr = uniqueLabels.join(", ");
+
+  let html = `<h2>Photos <span class="badge">${n}</span></h2>
+  <div class="gallery-main">
+    <button class="photo-nav-btn" id="gallery-prev"${currentIdx === 0 ? " disabled" : ""}>←</button>
+    <div class="gallery-photo-col">
+      <div class="photo-overlay-wrap" id="photo-wrap">
+        <img id="main-photo" class="main-photo" src="${detail.photo_url}" alt="${escHtml(detail.path)}">
+      </div>
+      <p class="gallery-info">${escHtml(detail.path)} · ${formatDate(detail.exif_date)} · ${currentIdx + 1}/${n}${labelsStr ? " · " + escHtml(labelsStr) : ""}</p>
+    </div>
+    <button class="photo-nav-btn" id="gallery-next"${currentIdx === n - 1 ? " disabled" : ""}>→</button>
+  </div>`;
+
+  html += `<div class="gallery-thumbs" id="gallery-thumbs">`;
+  for (let i = thumbStart; i < thumbEnd; i++) {
+    const p = _photosList[i];
+    html += `<img src="${p.photo_url}" class="gallery-thumb${i === currentIdx ? " active" : ""}"
+      data-idx="${i}" loading="lazy" title="${escHtml(p.path)}" width="80" height="60">`;
+  }
+  html += `</div>`;
+
+  if (totalThumbPages > 1) {
+    html += `<nav class="pagination" style="margin-top:0.5rem;">`;
+    if (thumbPage > 0)
+      html += `<button class="secondary outline" id="thumb-prev-page">← Prev</button>`;
+    html += `<span>Page ${thumbPage + 1} / ${totalThumbPages}</span>`;
+    if (thumbPage < totalThumbPages - 1)
+      html += `<button class="secondary outline" id="thumb-next-page">Next →</button>`;
     html += `</nav>`;
   }
 
-  app.innerHTML = html;
-
-  app.querySelectorAll(".photo-list-item").forEach(li => {
-    li.addEventListener("click", () => { location.hash = `#/photos/${li.dataset.md5}`; });
-  });
-}
-
-// ---------------------------------------------------------------------------
-// View: Photo Detail
-// ---------------------------------------------------------------------------
-async function renderPhotoDetail(md5) {
-  showSpinner();
-  let data;
-  try {
-    data = await apiFetch(`/api/photos/${md5}`);
-  } catch (e) {
-    showError(e.message);
-    return;
-  }
-
-  const app = document.getElementById("app");
-  let html = `
-    <p class="breadcrumb"><a href="#/photos">← Photos</a></p>
-    <h2>${escHtml(data.path)}</h2>
-    <p style="font-size:0.85rem;color:var(--pico-muted-color);">${formatDate(data.exif_date)}</p>
-    <div class="photo-overlay-wrap" id="photo-wrap">
-      <img id="main-photo" class="main-photo" src="${data.photo_url}" alt="${escHtml(data.path)}">
-    </div>`;
-
-  if (data.faces.length > 0) {
+  if (detail.faces.length > 0) {
     html += `<h3 style="margin-top:1.5rem;">Faces</h3><div class="face-grid">`;
-    data.faces.forEach(f => {
-      html += `
-        <div class="face-cell">
-          <img src="${f.img_url}" loading="lazy" title="${escHtml(f.sticky_name || "")}">
-          <a href="#/similar/${f.md5}/${bboxToPathParam(f.bbox)}" class="similar-link-btn" title="Find similar faces">≈</a>
-        </div>`;
+    detail.faces.forEach(f => {
+      html += `<div class="face-cell">
+        <img src="${f.img_url}" loading="lazy" title="${escHtml(f.sticky_name || "")}">
+        <a href="#/similar/${f.md5}/${bboxToPathParam(f.bbox)}" class="similar-link-btn" title="Find similar faces">≈</a>
+      </div>`;
     });
     html += `</div>`;
   }
 
-  app.innerHTML = html;
+  document.getElementById("app").innerHTML = html;
 
-  const imgEl = document.getElementById("main-photo");
+  // Bbox overlays
+  const imgEl  = document.getElementById("main-photo");
   const wrapEl = document.getElementById("photo-wrap");
 
-  function injectBboxOverlays() {
+  _injectBboxOverlays = function injectBboxOverlays() {
     wrapEl.querySelectorAll(".bbox-overlay").forEach(el => el.remove());
-    const nw = imgEl.naturalWidth;
-    const nh = imgEl.naturalHeight;
-    const sx = imgEl.clientWidth  / nw;
-    const sy = imgEl.clientHeight / nh;
-    data.faces.forEach(face => {
-      const [x1, y1, x2, y2] = transformBboxForDisplay(
-        face.bbox, data.exif_orientation, nw, nh
-      );
+    const nw = imgEl.naturalWidth, nh = imgEl.naturalHeight;
+    if (!nw || !nh) return;
+    const sx = imgEl.clientWidth / nw, sy = imgEl.clientHeight / nh;
+    detail.faces.forEach(face => {
+      const [x1, y1, x2, y2] = transformBboxForDisplay(face.bbox, detail.exif_orientation, nw, nh);
       const div = document.createElement("div");
       div.className = "bbox-overlay";
       div.style.left   = x1 * sx + "px";
       div.style.top    = y1 * sy + "px";
       div.style.width  = (x2 - x1) * sx + "px";
       div.style.height = (y2 - y1) * sy + "px";
-      if (face.sticky_name) {
+      if (face.sticky_name && !["__nonface__", "__foreign__"].includes(face.sticky_name)) {
         const lbl = document.createElement("div");
         lbl.className = "bbox-label";
         lbl.textContent = face.sticky_name;
@@ -696,20 +802,49 @@ async function renderPhotoDetail(md5) {
     });
   }
 
-  imgEl.addEventListener("load", injectBboxOverlays);
-  if (imgEl.complete && imgEl.naturalWidth) injectBboxOverlays();
-
-  let resizeTimer = null;
-  function onResize() {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(injectBboxOverlays, 100);
+  if (_params.showFaces) {
+    imgEl.addEventListener("load", _injectBboxOverlays);
+    if (imgEl.complete && imgEl.naturalWidth) _injectBboxOverlays();
   }
-  window.addEventListener("resize", onResize);
 
-  _cleanup = () => {
-    window.removeEventListener("resize", onResize);
-    clearTimeout(resizeTimer);
+  // Nav buttons
+  document.getElementById("gallery-prev")?.addEventListener("click", () => {
+    if (currentIdx > 0) _loadPhotoAtIdx(currentIdx - 1);
+  });
+  document.getElementById("gallery-next")?.addEventListener("click", () => {
+    if (currentIdx < n - 1) _loadPhotoAtIdx(currentIdx + 1);
+  });
+
+  // Thumbnail clicks
+  document.getElementById("gallery-thumbs").querySelectorAll(".gallery-thumb").forEach(img => {
+    img.addEventListener("click", () => _loadPhotoAtIdx(parseInt(img.dataset.idx, 10)));
+  });
+
+  // Thumb page nav
+  document.getElementById("thumb-prev-page")?.addEventListener("click", () => {
+    _loadPhotoAtIdx((thumbPage - 1) * THUMB_PAGE_SIZE);
+  });
+  document.getElementById("thumb-next-page")?.addEventListener("click", () => {
+    _loadPhotoAtIdx((thumbPage + 1) * THUMB_PAGE_SIZE);
+  });
+
+  // Keyboard nav
+  _galleryKeyHandler = e => {
+    if (document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) return;
+    if (e.key === "ArrowLeft"  && currentIdx > 0)     _loadPhotoAtIdx(currentIdx - 1);
+    if (e.key === "ArrowRight" && currentIdx < n - 1) _loadPhotoAtIdx(currentIdx + 1);
   };
+  document.addEventListener("keydown", _galleryKeyHandler);
+
+  // Resize handler
+  _galleryResizeHandler = () => {
+    if (!_params.showFaces) return;
+    clearTimeout(_galleryResizeTimer);
+    _galleryResizeTimer = setTimeout(_injectBboxOverlays, 100);
+  };
+  window.addEventListener("resize", _galleryResizeHandler);
+
+  _cleanup = _galleryCleanupListeners;
 }
 
 // ---------------------------------------------------------------------------
