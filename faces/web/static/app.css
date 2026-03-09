@@ -489,3 +489,31 @@
 }
 .gallery-thumb:hover  { opacity: 1; }
 .gallery-thumb.active { border-color: var(--pico-primary); opacity: 1; }
+
+/* Autocomplete dropdown */
+.ac-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+  background: var(--pico-card-background-color);
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  max-height: 200px;
+  overflow-y: auto;
+}
+.ac-dropdown li {
+  padding: 0.35rem 0.6rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.ac-dropdown li:hover,
+.ac-dropdown li.ac-active {
+  background: var(--pico-primary-background);
+  color: var(--pico-primary-inverse);
+}

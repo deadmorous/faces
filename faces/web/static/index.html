@@ -47,7 +47,10 @@
       </div>
       <div class="sidebar-group hidden" id="sb-group-labels">
         <label>Show photos with</label>
-        <input type="text" id="sb-labels" placeholder="Alice, Bob" autocomplete="off">
+        <div style="position:relative;">
+          <input type="text" id="sb-labels" placeholder="Alice, Bob" autocomplete="off">
+          <ul id="sb-labels-dropdown" class="ac-dropdown" hidden></ul>
+        </div>
       </div>
       <div class="sidebar-group hidden" id="sb-group-sort">
         <label>Sort by</label>

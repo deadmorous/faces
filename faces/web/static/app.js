@@ -21,6 +21,7 @@ const _params = {
 let _currentView     = null;   // "unlabeled" | "classify" | "similar" | ...
 let _currentViewArgs = {};     // per-view re-render args
 let _algorithms      = null;   // cached from /api/classify/algorithms
+let _peopleCache     = null;   // resolved once from /api/people
 
 // Gallery state
 let _photosList = [];
@@ -58,6 +59,18 @@ async function apiFetch(path) {
   const res = await fetch(path);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText} — ${path}`);
   return res.json();
+}
+
+async function _getPeopleNames() {
+  if (_peopleCache) return _peopleCache;
+  try {
+    const people = await apiFetch("/api/people");
+    _peopleCache = people
+      .map(p => p.name)
+      .filter(n => !SPECIAL_LABELS.includes(n))
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  } catch { _peopleCache = []; }
+  return _peopleCache;
 }
 
 async function apiPost(path, body) {
@@ -227,6 +240,81 @@ function rerenderCurrentView() {
   }
 }
 
+function initLabelsAutocomplete() {
+  const input    = document.getElementById("sb-labels");
+  const dropdown = document.getElementById("sb-labels-dropdown");
+  let activeIdx  = -1;
+
+  function currentToken() {
+    const val = input.value;
+    const lastComma = val.lastIndexOf(",");
+    return lastComma >= 0 ? val.slice(lastComma + 1).trimStart() : val;
+  }
+
+  function replaceCurrentToken(name) {
+    const val = input.value;
+    const lastComma = val.lastIndexOf(",");
+    const prefix = lastComma >= 0 ? val.slice(0, lastComma + 1) + " " : "";
+    input.value = prefix + name + ", ";
+    input.dispatchEvent(new Event("change"));
+    hideDropdown();
+    input.focus();
+  }
+
+  function hideDropdown() {
+    dropdown.hidden = true;
+    dropdown.innerHTML = "";
+    activeIdx = -1;
+  }
+
+  function showDropdown(names) {
+    dropdown.innerHTML = names
+      .map((n, i) => `<li data-idx="${i}">${escHtml(n)}</li>`)
+      .join("");
+    dropdown.hidden = false;
+    activeIdx = -1;
+    dropdown.querySelectorAll("li").forEach(li => {
+      li.addEventListener("mousedown", e => {
+        e.preventDefault();
+        replaceCurrentToken(names[parseInt(li.dataset.idx, 10)]);
+      });
+    });
+  }
+
+  input.addEventListener("input", async () => {
+    const token = currentToken().toLowerCase();
+    if (!token) { hideDropdown(); return; }
+    const names = await _getPeopleNames();
+    const already = input.value.split(",").map(s => s.trim().toLowerCase());
+    const matches = names.filter(n =>
+      n.toLowerCase().includes(token) && !already.includes(n.toLowerCase())
+    );
+    if (matches.length === 0) { hideDropdown(); return; }
+    showDropdown(matches);
+  });
+
+  input.addEventListener("keydown", e => {
+    const items = dropdown.querySelectorAll("li");
+    if (dropdown.hidden || items.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      activeIdx = (activeIdx + 1) % items.length;
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      activeIdx = (activeIdx - 1 + items.length) % items.length;
+    } else if (e.key === "Enter" && activeIdx >= 0) {
+      e.preventDefault();
+      items[activeIdx].dispatchEvent(new MouseEvent("mousedown"));
+      return;
+    } else if (e.key === "Escape") {
+      hideDropdown(); return;
+    } else { return; }
+    items.forEach((li, i) => li.classList.toggle("ac-active", i === activeIdx));
+  });
+
+  input.addEventListener("blur", () => setTimeout(hideDropdown, 150));
+}
+
 function initSidebar() {
   const sbThresh     = document.getElementById("sb-thresh");
   const sbThreshVal  = document.getElementById("sb-thresh-val");
@@ -328,6 +416,8 @@ function initSidebar() {
     if (d.min_year && d.max_year)
       hint.textContent = `DB: ${d.min_year} – ${d.max_year}`;
   }).catch(() => {});
+
+  initLabelsAutocomplete();
 }
 
 // ---------------------------------------------------------------------------
