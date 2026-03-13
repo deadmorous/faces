@@ -22,6 +22,8 @@ let _currentView     = null;   // "unlabeled" | "classify" | "similar" | ...
 let _currentViewArgs = {};     // per-view re-render args
 let _algorithms      = null;   // cached from /api/classify/algorithms
 let _peopleCache     = null;   // resolved once from /api/people
+let _dayIndex        = null;   // built from _photosList when sort=date_asc
+let _timelinePopup   = null;   // currently open timeline popup element
 
 // Gallery state
 let _photosList = [];
@@ -36,6 +38,187 @@ function _galleryCleanupListeners() {
   if (_galleryResizeHandler) { window.removeEventListener("resize", _galleryResizeHandler); _galleryResizeHandler = null; }
   clearTimeout(_galleryResizeTimer);
   _injectBboxOverlays = null;
+}
+
+// ---------------------------------------------------------------------------
+// Timeline navigation helpers
+// ---------------------------------------------------------------------------
+function _buildDayIndex(photos) {
+  const byYMD = {};
+  photos.forEach((p, i) => {
+    if (!p.exif_date) return;
+    const dt = new Date(p.exif_date * 1000);
+    const y = dt.getFullYear(), m = dt.getMonth() + 1, d = dt.getDate();
+    if (!byYMD[y]) byYMD[y] = {};
+    if (!byYMD[y][m]) byYMD[y][m] = {};
+    if (!byYMD[y][m][d]) byYMD[y][m][d] = [];
+    byYMD[y][m][d].push(i);
+  });
+  const years = Object.keys(byYMD).map(Number).sort((a, b) => b - a);
+  return { byYMD, years };
+}
+
+function _photoDateParts(ts) {
+  if (!ts) return null;
+  const dt = new Date(ts * 1000);
+  return { y: dt.getFullYear(), m: dt.getMonth() + 1, d: dt.getDate() };
+}
+
+function _updateTimelinePane(ts) {
+  const el = document.getElementById("tl-year");
+  if (!el) return;
+  const p = _photoDateParts(ts);
+  document.getElementById("tl-year").textContent  = p ? p.y : "—";
+  document.getElementById("tl-month").textContent = p ? String(p.m).padStart(2, "0") : "—";
+  document.getElementById("tl-day").textContent   = p ? String(p.d).padStart(2, "0") : "—";
+}
+
+function _closeTimelinePopup() {
+  if (_timelinePopup) {
+    _timelinePopup._tlCleanup?.();
+    _timelinePopup.remove();
+    _timelinePopup = null;
+  }
+}
+
+function _openTimelinePopup(paneEl) {
+  _closeTimelinePopup();
+  if (!_dayIndex || !_dayIndex.years.length) return;
+
+  const ts = _photosList[_currentViewArgs.currentIdx]?.exif_date;
+  const cur = _photoDateParts(ts);
+  if (!cur) return;
+
+  let tlY = cur.y, tlM = cur.m, tlD = cur.d;
+
+  const popup = document.createElement("div");
+  popup.className = "tl-popup";
+  document.body.appendChild(popup);
+  _timelinePopup = popup;
+
+  // Position to the right of the pane
+  const rect = paneEl.getBoundingClientRect();
+  popup.style.top      = rect.top + "px";
+  popup.style.left     = (rect.right + 6) + "px";
+  popup.style.maxHeight = (window.innerHeight - rect.top - 8) + "px";
+
+  function getMonths(y) {
+    return Object.keys(_dayIndex.byYMD[y] || {}).map(Number).sort((a, b) => b - a);
+  }
+  function getDays(y, m) {
+    return Object.keys(_dayIndex.byYMD[y]?.[m] || {}).map(Number).sort((a, b) => b - a);
+  }
+  function selectClosest(arr, val) {
+    if (arr.includes(val)) return val;
+    return arr.reduce((best, x) => (Math.abs(x - val) < Math.abs(best - val) ? x : best), arr[0]);
+  }
+
+  // Build a scrollable band <ul>
+  function makeBand(id) {
+    const ul = document.createElement("ul");
+    ul.className = "tl-band";
+    ul.id = id;
+    popup.appendChild(ul);
+    return ul;
+  }
+
+  function fillBand(band, items, selectedVal, onHover) {
+    band.innerHTML = "";
+    items.forEach(item => {
+      const li = document.createElement("li");
+      li.textContent = String(item).padStart(item > 99 ? 4 : 2, "0");
+      li.dataset.val = item;
+      if (item === selectedVal) li.classList.add("tl-active");
+      li.addEventListener("mouseenter", () => {
+        band.querySelectorAll("li").forEach(l => l.classList.remove("tl-active"));
+        li.classList.add("tl-active");
+        onHover(item);
+      });
+      band.appendChild(li);
+    });
+    // Scroll active item into view within the band
+    const active = band.querySelector(".tl-active");
+    if (active) {
+      requestAnimationFrame(() => {
+        band.scrollTop = active.offsetTop - band.clientHeight / 2 + active.clientHeight / 2;
+      });
+    }
+  }
+
+  const yearBand  = makeBand("tl-band-year");
+  const monthBand = makeBand("tl-band-month");
+  const dayBand   = makeBand("tl-band-day");
+
+  let _loadTimer = null;
+
+  function scheduleDayLoad() {
+    // Update pane immediately
+    document.getElementById("tl-year").textContent  = tlY;
+    document.getElementById("tl-month").textContent = String(tlM).padStart(2, "0");
+    document.getElementById("tl-day").textContent   = String(tlD).padStart(2, "0");
+    clearTimeout(_loadTimer);
+    _loadTimer = setTimeout(() => {
+      const indices = _dayIndex.byYMD[tlY]?.[tlM]?.[tlD];
+      if (indices?.length) _loadPhotoAtIdx(indices[0]);
+    }, 160);
+  }
+
+  function onHoverYear(y) {
+    tlY = y;
+    const months = getMonths(y);
+    tlM = selectClosest(months, tlM);
+    const days = getDays(y, tlM);
+    tlD = selectClosest(days, tlD);
+    fillBand(monthBand, months, tlM, onHoverMonth);
+    fillBand(dayBand, days, tlD, onHoverDay);
+    scheduleDayLoad();
+  }
+
+  function onHoverMonth(m) {
+    tlM = m;
+    const days = getDays(tlY, m);
+    tlD = selectClosest(days, tlD);
+    fillBand(dayBand, days, tlD, onHoverDay);
+    scheduleDayLoad();
+  }
+
+  function onHoverDay(d) {
+    tlD = d;
+    scheduleDayLoad();
+  }
+
+  // Initial population
+  fillBand(yearBand,  _dayIndex.years,  tlY, onHoverYear);
+  fillBand(monthBand, getMonths(tlY),   tlM, onHoverMonth);
+  fillBand(dayBand,   getDays(tlY, tlM), tlD, onHoverDay);
+
+  // Clicking any band item: load immediately and close
+  popup.addEventListener("click", e => {
+    if (e.target.tagName !== "LI") return;
+    clearTimeout(_loadTimer);
+    const indices = _dayIndex.byYMD[tlY]?.[tlM]?.[tlD];
+    if (indices?.length) _loadPhotoAtIdx(indices[0]);
+    _closeTimelinePopup();
+  });
+
+  // Close on click outside / Escape (deferred so the opening click doesn't immediately close it)
+  function closeOnClick(e) {
+    if (!popup.contains(e.target) && e.target !== paneEl && !paneEl.contains(e.target))
+      _closeTimelinePopup();
+  }
+  function closeOnKey(e) {
+    if (e.key === "Escape") _closeTimelinePopup();
+  }
+  setTimeout(() => {
+    document.addEventListener("mousedown", closeOnClick);
+    document.addEventListener("keydown", closeOnKey);
+  }, 0);
+
+  popup._tlCleanup = () => {
+    clearTimeout(_loadTimer);
+    document.removeEventListener("mousedown", closeOnClick);
+    document.removeEventListener("keydown", closeOnKey);
+  };
 }
 
 function _findFallbackIdx(photos) {
@@ -217,6 +400,7 @@ function setSidebarView(view) {
   const showFaces      = view === "photos";
   const showLabels     = view === "photos";
   const showSort       = view === "photos";
+  const showTimeline   = view === "photos" && _params.photoSort === "date_asc";
   document.getElementById("sb-group-threshold").classList.toggle("hidden", !showThresh);
   document.getElementById("sb-group-relsize")  .classList.toggle("hidden", !showRelSize);
   document.getElementById("sb-group-algo")     .classList.toggle("hidden", !showAlgo);
@@ -225,6 +409,7 @@ function setSidebarView(view) {
   document.getElementById("sb-group-labels")   .classList.toggle("hidden", !showLabels);
   document.getElementById("sb-group-sort")     .classList.toggle("hidden", !showSort);
   document.getElementById("sb-group-refrange") .classList.toggle("hidden", !showRefRange);
+  document.getElementById("sb-group-timeline") .classList.toggle("hidden", !showTimeline);
 }
 
 function rerenderCurrentView() {
@@ -407,7 +592,14 @@ function initSidebar() {
   sbSort.addEventListener("change", e => {
     _params.photoSort = e.target.value;
     localStorage.setItem("sb_photoSort", _params.photoSort);
+    document.getElementById("sb-group-timeline")
+      .classList.toggle("hidden", _params.photoSort !== "date_asc");
     rerenderCurrentView();
+  });
+
+  document.getElementById("sb-timeline-pane").addEventListener("click", () => {
+    if (_timelinePopup) { _closeTimelinePopup(); return; }
+    _openTimelinePopup(document.getElementById("sb-timeline-pane"));
   });
 
   // Fetch DB date coverage hint
@@ -762,6 +954,7 @@ async function renderPhotos(currentMd5 = null) {
   } catch (e) { showError(e.message); return; }
 
   _photosList = data.photos;
+  _dayIndex   = _buildDayIndex(_photosList);
 
   if (_photosList.length === 0) {
     document.getElementById("app").innerHTML = `<h2>Photos</h2><p>No photos match the current filter.</p>`;
@@ -810,9 +1003,19 @@ async function _loadPhotoAtIdx(idx) {
 function _renderPhotosGallery(currentIdx, detail) {
   _galleryCleanupListeners();
   const n = _photosList.length;
-  const thumbPage      = Math.floor(currentIdx / THUMB_PAGE_SIZE);
-  const thumbStart     = thumbPage * THUMB_PAGE_SIZE;
-  const thumbEnd       = Math.min(thumbStart + THUMB_PAGE_SIZE, n);
+
+  // Per-day thumb strip when sorted by date and day index available
+  const useDayView = _params.photoSort === "date_asc" && _dayIndex
+    && _photosList[currentIdx]?.exif_date;
+  const dayThumbIndices = useDayView ? (() => {
+    const dp = _photoDateParts(_photosList[currentIdx].exif_date);
+    return _dayIndex.byYMD[dp.y]?.[dp.m]?.[dp.d] ?? [currentIdx];
+  })() : null;
+
+  // Standard pagination (used when not in day view)
+  const thumbPage       = Math.floor(currentIdx / THUMB_PAGE_SIZE);
+  const thumbStart      = thumbPage * THUMB_PAGE_SIZE;
+  const thumbEnd        = Math.min(thumbStart + THUMB_PAGE_SIZE, n);
   const totalThumbPages = Math.ceil(n / THUMB_PAGE_SIZE);
 
   const uniqueLabels = [...new Set(
@@ -835,14 +1038,19 @@ function _renderPhotosGallery(currentIdx, detail) {
   </div>`;
 
   html += `<div class="gallery-thumbs" id="gallery-thumbs">`;
-  for (let i = thumbStart; i < thumbEnd; i++) {
+  const renderIndices = useDayView ? dayThumbIndices : (() => {
+    const arr = [];
+    for (let i = thumbStart; i < thumbEnd; i++) arr.push(i);
+    return arr;
+  })();
+  for (const i of renderIndices) {
     const p = _photosList[i];
     html += `<img src="${p.photo_url}" class="gallery-thumb${i === currentIdx ? " active" : ""}"
       data-idx="${i}" loading="lazy" title="${escHtml(p.path)}" width="80" height="60">`;
   }
   html += `</div>`;
 
-  if (totalThumbPages > 1) {
+  if (!useDayView && totalThumbPages > 1) {
     html += `<nav class="pagination" style="margin-top:0.5rem;">`;
     if (thumbPage > 0)
       html += `<button class="secondary outline" id="thumb-prev-page">← Prev</button>`;
@@ -864,6 +1072,9 @@ function _renderPhotosGallery(currentIdx, detail) {
   }
 
   document.getElementById("app").innerHTML = html;
+
+  // Update timeline pane with current photo's date
+  _updateTimelinePane(_photosList[currentIdx]?.exif_date);
 
   // Bbox overlays
   const imgEl  = document.getElementById("main-photo");
@@ -907,7 +1118,10 @@ function _renderPhotosGallery(currentIdx, detail) {
 
   // Thumbnail clicks
   document.getElementById("gallery-thumbs").querySelectorAll(".gallery-thumb").forEach(img => {
-    img.addEventListener("click", () => _loadPhotoAtIdx(parseInt(img.dataset.idx, 10)));
+    img.addEventListener("click", () => {
+      _closeTimelinePopup();
+      _loadPhotoAtIdx(parseInt(img.dataset.idx, 10));
+    });
   });
 
   // Thumb page nav
@@ -934,7 +1148,7 @@ function _renderPhotosGallery(currentIdx, detail) {
   };
   window.addEventListener("resize", _galleryResizeHandler);
 
-  _cleanup = _galleryCleanupListeners;
+  _cleanup = () => { _galleryCleanupListeners(); _closeTimelinePopup(); };
 }
 
 // ---------------------------------------------------------------------------
