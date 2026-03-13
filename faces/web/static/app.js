@@ -96,11 +96,11 @@ function _openTimelinePopup(paneEl) {
   document.body.appendChild(popup);
   _timelinePopup = popup;
 
-  // Position to the right of the pane
+  // Anchor left edge next to the pane; top is irrelevant — each band shifts itself
   const rect = paneEl.getBoundingClientRect();
-  popup.style.top      = rect.top + "px";
-  popup.style.left     = (rect.right + 6) + "px";
-  popup.style.maxHeight = (window.innerHeight - rect.top - 8) + "px";
+  const paneCenter = rect.top + rect.height / 2;
+  popup.style.top  = "0px";
+  popup.style.left = (rect.right + 6) + "px";
 
   function getMonths(y) {
     return Object.keys(_dayIndex.byYMD[y] || {}).map(Number).sort((a, b) => b - a);
@@ -113,7 +113,16 @@ function _openTimelinePopup(paneEl) {
     return arr.reduce((best, x) => (Math.abs(x - val) < Math.abs(best - val) ? x : best), arr[0]);
   }
 
-  // Build a scrollable band <ul>
+  // Shift band so its active item's center aligns with pane center
+  function alignBand(band) {
+    requestAnimationFrame(() => {
+      const active = band.querySelector(".tl-active");
+      if (!active) return;
+      const shift = paneCenter - (active.offsetTop + active.offsetHeight / 2);
+      band.style.transform = `translateY(${shift}px)`;
+    });
+  }
+
   function makeBand(id) {
     const ul = document.createElement("ul");
     ul.className = "tl-band";
@@ -136,13 +145,7 @@ function _openTimelinePopup(paneEl) {
       });
       band.appendChild(li);
     });
-    // Scroll active item into view within the band
-    const active = band.querySelector(".tl-active");
-    if (active) {
-      requestAnimationFrame(() => {
-        band.scrollTop = active.offsetTop - band.clientHeight / 2 + active.clientHeight / 2;
-      });
-    }
+    alignBand(band);
   }
 
   const yearBand  = makeBand("tl-band-year");

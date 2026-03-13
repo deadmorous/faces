@@ -512,22 +512,22 @@
   position: fixed;
   display: flex;
   flex-direction: row;
+  align-items: flex-start;
+  gap: 5px;
+  z-index: 200;
+  pointer-events: none;  /* bands handle events; container is transparent */
+}
+.tl-band {
+  list-style: none;
+  padding: 4px 0;
+  margin: 0;
+  min-width: 54px;
   background: var(--pico-card-background-color);
   border: 1px solid var(--pico-muted-border-color);
   border-radius: 6px;
   box-shadow: 0 4px 16px rgba(0,0,0,0.2);
-  z-index: 200;
-  overflow: hidden;
+  pointer-events: all;
 }
-.tl-band {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  overflow-y: auto;
-  min-width: 54px;
-  border-right: 1px solid var(--pico-muted-border-color);
-}
-.tl-band:last-child { border-right: none; }
 .tl-band li {
   padding: 0.3rem 0.55rem;
   font-size: 0.85rem;
