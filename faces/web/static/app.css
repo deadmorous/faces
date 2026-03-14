@@ -474,9 +474,25 @@
 }
 .gallery-thumbs {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 3px;
   margin-top: 0.25rem;
+  overflow-x: auto;
+}
+.gallery-thumbs.expanded {
+  flex-wrap: wrap;
+  overflow-x: visible;
+}
+
+.preview-band-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.4rem;
+}
+.preview-band-bar button {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.45rem;
+  margin: 0;
 }
 .gallery-thumb {
   width: 80px;

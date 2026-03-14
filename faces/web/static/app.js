@@ -16,7 +16,8 @@ const _params = {
   refDateTo:   localStorage.getItem("sb_refDateTo")   || "",
   photoLabels: localStorage.getItem("sb_photoLabels") || "",
   photoSort:   localStorage.getItem("sb_photoSort")   || "date_asc",
-  showFaces:   localStorage.getItem("sb_showFaces") === "true",
+  showFaces:        localStorage.getItem("sb_showFaces") === "true",
+  previewExpanded:  localStorage.getItem("sb_previewExpanded") === "true",
 };
 let _currentView     = null;   // "unlabeled" | "classify" | "similar" | ...
 let _currentViewArgs = {};     // per-view re-render args
@@ -1040,12 +1041,24 @@ function _renderPhotosGallery(currentIdx, detail) {
     <button class="photo-nav-btn" id="gallery-next"${currentIdx === n - 1 ? " disabled" : ""}>→</button>
   </div>`;
 
-  html += `<div class="gallery-thumbs" id="gallery-thumbs">`;
   const renderIndices = useDayView ? dayThumbIndices : (() => {
     const arr = [];
     for (let i = thumbStart; i < thumbEnd; i++) arr.push(i);
     return arr;
   })();
+
+  if (useDayView) {
+    const isExp = _params.previewExpanded;
+    const btnLabel = isExp
+      ? "▲ collapse"
+      : `▼ show all (${renderIndices.length})`;
+    html += `<div class="preview-band-bar">
+      <button class="outline" id="preview-toggle">${btnLabel}</button>
+    </div>`;
+  }
+
+  const thumbsClass = "gallery-thumbs" + (useDayView && !_params.previewExpanded ? "" : " expanded");
+  html += `<div class="${thumbsClass}" id="gallery-thumbs">`;
   for (const i of renderIndices) {
     const p = _photosList[i];
     html += `<img src="${p.photo_url}" class="gallery-thumb${i === currentIdx ? " active" : ""}"
@@ -1110,6 +1123,18 @@ function _renderPhotosGallery(currentIdx, detail) {
     imgEl.addEventListener("load", _injectBboxOverlays);
     if (imgEl.complete && imgEl.naturalWidth) _injectBboxOverlays();
   }
+
+  // Preview band toggle
+  document.getElementById("preview-toggle")?.addEventListener("click", () => {
+    _params.previewExpanded = !_params.previewExpanded;
+    localStorage.setItem("sb_previewExpanded", _params.previewExpanded);
+    const thumbs = document.getElementById("gallery-thumbs");
+    thumbs.classList.toggle("expanded", _params.previewExpanded);
+    const btn = document.getElementById("preview-toggle");
+    btn.textContent = _params.previewExpanded
+      ? "▲ collapse"
+      : `▼ show all (${renderIndices.length})`;
+  });
 
   // Nav buttons
   document.getElementById("gallery-prev")?.addEventListener("click", () => {
