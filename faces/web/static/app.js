@@ -88,9 +88,6 @@ function _openTimelinePopup(paneEl) {
 
   const ts = _photosList[_currentViewArgs.currentIdx]?.exif_date;
   const cur = _photoDateParts(ts);
-  if (!cur) return;
-
-  let tlY = cur.y, tlM = cur.m, tlD = cur.d;
 
   const popup = document.createElement("div");
   popup.className = "tl-popup";
@@ -113,6 +110,13 @@ function _openTimelinePopup(paneEl) {
     if (arr.includes(val)) return val;
     return arr.reduce((best, x) => (Math.abs(x - val) < Math.abs(best - val) ? x : best), arr[0]);
   }
+
+  const _fallbackY = _dayIndex.years[0];
+  const _fallbackM = getMonths(_fallbackY)[0];
+  const _fallbackD = getDays(_fallbackY, _fallbackM)[0];
+  let tlY = cur?.y ?? _fallbackY;
+  let tlM = cur?.m ?? _fallbackM;
+  let tlD = cur?.d ?? _fallbackD;
 
   // Shift band so its active item's center aligns with targetY
   function alignBand(band, targetY) {
