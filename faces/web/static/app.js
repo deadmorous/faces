@@ -625,6 +625,7 @@ function initSidebar() {
 // Router
 // ---------------------------------------------------------------------------
 function route() {
+  document.body.classList.remove("photos-active");
   // Teardown current view
   if (_cleanup) { _cleanup(); _cleanup = null; }
 
@@ -652,6 +653,7 @@ function route() {
     case "photos":
       _currentView = "photos";
       setSidebarView("photos");
+      document.body.classList.add("photos-active");
       if (parts[1] && parts[1] !== "page") {
         renderPhotos(parts[1]);   // md5 specified
       } else {
@@ -1034,65 +1036,74 @@ function _renderPhotosGallery(currentIdx, detail) {
   )];
   const labelsStr = uniqueLabels.join(", ");
 
-  let html = `<h2>Photos <span class="badge">${n}</span></h2>
-  <div class="gallery-main">
-    <button class="photo-nav-btn" id="gallery-prev"${currentIdx === 0 ? " disabled" : ""}>←</button>
-    <div class="gallery-photo-col">
-      <div class="photo-overlay-wrap" id="photo-wrap">
-        <img id="main-photo" class="main-photo" src="${detail.photo_url}" alt="${escHtml(detail.path)}">
-      </div>
-      <p class="gallery-info">${escHtml(detail.path)} · ${formatDate(detail.exif_date)} · ${currentIdx + 1}/${n}${labelsStr ? " · " + escHtml(labelsStr) : ""}</p>
-    </div>
-    <button class="photo-nav-btn" id="gallery-next"${currentIdx === n - 1 ? " disabled" : ""}>→</button>
-  </div>`;
-
   const renderIndices = useDayView ? dayThumbIndices : (() => {
     const arr = [];
     for (let i = thumbStart; i < thumbEnd; i++) arr.push(i);
     return arr;
   })();
 
-  if (useDayView) {
-    const isExp = _params.previewExpanded;
-    const btnLabel = isExp
-      ? "▲ collapse"
-      : `▼ show all (${renderIndices.length})`;
-    html += `<div class="preview-band-bar">
-      <button class="outline" id="preview-toggle">${btnLabel}</button>
-    </div>`;
-  }
+  // Update view title in nav
+  const viewTitleEl = document.getElementById("view-title");
+  viewTitleEl.textContent = `Photos (${n})`;
+  viewTitleEl.classList.remove("hidden");
 
-  const thumbsClass = "gallery-thumbs" + (useDayView && !_params.previewExpanded ? "" : " expanded");
-  html += `<div class="${thumbsClass}" id="gallery-thumbs">`;
+  let html = `<div class="photos-layout">`;
+
+  // Large photo area
+  html += `<div class="photos-main-area">
+    <div class="photo-overlay-wrap" id="photo-wrap">
+      <img id="main-photo" class="main-photo" src="${detail.photo_url}" alt="${escHtml(detail.path)}">
+    </div>
+    <div class="photos-info-overlay">${escHtml(detail.path)} · ${formatDate(detail.exif_date)} · ${currentIdx + 1}/${n}${labelsStr ? " · " + escHtml(labelsStr) : ""}</div>
+  </div>`;
+
+  // Preview band
+  html += `<div class="photos-preview-band" id="preview-band">`;
+  html += `<button class="photo-nav-btn" id="gallery-prev"${currentIdx === 0 ? " disabled" : ""}><</button>`;
+  html += `<div class="preview-thumbs-area"><div class="gallery-thumbs" id="gallery-thumbs">`;
   for (const i of renderIndices) {
     const p = _photosList[i];
     html += `<img src="${p.photo_url}" class="gallery-thumb${i === currentIdx ? " active" : ""}"
       data-idx="${i}" loading="lazy" title="${escHtml(p.path)}" width="80" height="60">`;
   }
+  html += `</div></div>`;  // close gallery-thumbs + preview-thumbs-area
+  html += `<button class="photo-nav-btn" id="gallery-next"${currentIdx === n - 1 ? " disabled" : ""}>></button>`;
+  if (useDayView) {
+    html += `<button class="preview-toggle-btn" id="preview-toggle">${_params.previewExpanded ? "▼" : "▲"}</button>`;
+    // Popup is inside the band so position:absolute bottom:100% anchors to band
+    html += `<div class="preview-popup" id="preview-popup"${_params.previewExpanded ? "" : ' style="display:none"'}>`;
+    html += `<div class="gallery-thumbs expanded">`;
+    for (const i of renderIndices) {
+      const p = _photosList[i];
+      html += `<img src="${p.photo_url}" class="gallery-thumb${i === currentIdx ? " active" : ""}"
+        data-idx="${i}" loading="lazy" title="${escHtml(p.path)}" width="80" height="60">`;
+    }
+    html += `</div></div>`;
+  }
+  html += `</div>`;  // close photos-preview-band
+
+  // Faces band — always rendered to hold its fixed height
+  html += `<div class="photos-faces-band" id="faces-band">`;
+  detail.faces.forEach(f => {
+    html += `<div class="face-cell">
+      <img src="${f.img_url}" loading="lazy" title="${escHtml(f.sticky_name || "")}">
+      <a href="#/similar/${f.md5}/${bboxToPathParam(f.bbox)}" class="similar-link-btn" title="Find similar faces">≈</a>
+    </div>`;
+  });
   html += `</div>`;
 
-  if (!useDayView && totalThumbPages > 1) {
-    html += `<nav class="pagination" style="margin-top:0.5rem;">`;
-    if (thumbPage > 0)
-      html += `<button class="secondary outline" id="thumb-prev-page">← Prev</button>`;
-    html += `<span>Page ${thumbPage + 1} / ${totalThumbPages}</span>`;
-    if (thumbPage < totalThumbPages - 1)
-      html += `<button class="secondary outline" id="thumb-next-page">Next →</button>`;
-    html += `</nav>`;
-  }
-
-  if (detail.faces.length > 0) {
-    html += `<h3 style="margin-top:1.5rem;">Faces</h3><div class="face-grid">`;
-    detail.faces.forEach(f => {
-      html += `<div class="face-cell">
-        <img src="${f.img_url}" loading="lazy" title="${escHtml(f.sticky_name || "")}">
-        <a href="#/similar/${f.md5}/${bboxToPathParam(f.bbox)}" class="similar-link-btn" title="Find similar faces">≈</a>
-      </div>`;
-    });
-    html += `</div>`;
-  }
-
+  html += `</div>`;  // close photos-layout
   document.getElementById("app").innerHTML = html;
+
+  // Popup max-height = half the photo area height
+  function _updatePopupMaxHeight() {
+    const mainArea = document.querySelector(".photos-main-area");
+    const popup = document.getElementById("preview-popup");
+    if (mainArea && popup) {
+      popup.style.maxHeight = Math.floor(mainArea.clientHeight / 2) + "px";
+    }
+  }
+  _updatePopupMaxHeight();
 
   // Update timeline pane with current photo's date
   _updateTimelinePane(_photosList[currentIdx]?.exif_date);
@@ -1133,12 +1144,10 @@ function _renderPhotosGallery(currentIdx, detail) {
   document.getElementById("preview-toggle")?.addEventListener("click", () => {
     _params.previewExpanded = !_params.previewExpanded;
     localStorage.setItem("sb_previewExpanded", _params.previewExpanded);
-    const thumbs = document.getElementById("gallery-thumbs");
-    thumbs.classList.toggle("expanded", _params.previewExpanded);
+    const popup = document.getElementById("preview-popup");
+    if (popup) popup.style.display = _params.previewExpanded ? "" : "none";
     const btn = document.getElementById("preview-toggle");
-    btn.textContent = _params.previewExpanded
-      ? "▲ collapse"
-      : `▼ show all (${renderIndices.length})`;
+    btn.textContent = _params.previewExpanded ? "▼" : "▲";
   });
 
   // Nav buttons
@@ -1149,7 +1158,7 @@ function _renderPhotosGallery(currentIdx, detail) {
     if (currentIdx < n - 1) _loadPhotoAtIdx(currentIdx + 1);
   });
 
-  // Thumbnail clicks
+  // Thumbnail clicks (band strip)
   document.getElementById("gallery-thumbs").querySelectorAll(".gallery-thumb").forEach(img => {
     img.addEventListener("click", () => {
       _closeTimelinePopup();
@@ -1157,12 +1166,12 @@ function _renderPhotosGallery(currentIdx, detail) {
     });
   });
 
-  // Thumb page nav
-  document.getElementById("thumb-prev-page")?.addEventListener("click", () => {
-    _loadPhotoAtIdx((thumbPage - 1) * THUMB_PAGE_SIZE);
-  });
-  document.getElementById("thumb-next-page")?.addEventListener("click", () => {
-    _loadPhotoAtIdx((thumbPage + 1) * THUMB_PAGE_SIZE);
+  // Thumbnail clicks (expanded popup)
+  document.getElementById("preview-popup")?.querySelectorAll(".gallery-thumb").forEach(img => {
+    img.addEventListener("click", () => {
+      _closeTimelinePopup();
+      _loadPhotoAtIdx(parseInt(img.dataset.idx, 10));
+    });
   });
 
   // Keyboard nav
@@ -1175,13 +1184,18 @@ function _renderPhotosGallery(currentIdx, detail) {
 
   // Resize handler
   _galleryResizeHandler = () => {
+    _updatePopupMaxHeight();
     if (!_params.showFaces) return;
     clearTimeout(_galleryResizeTimer);
     _galleryResizeTimer = setTimeout(_injectBboxOverlays, 100);
   };
   window.addEventListener("resize", _galleryResizeHandler);
 
-  _cleanup = () => { _galleryCleanupListeners(); _closeTimelinePopup(); };
+  _cleanup = () => {
+    _galleryCleanupListeners();
+    _closeTimelinePopup();
+    document.getElementById("view-title")?.classList.add("hidden");
+  };
 }
 
 // ---------------------------------------------------------------------------

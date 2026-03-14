@@ -40,6 +40,13 @@
   color: var(--pico-color);
 }
 
+.view-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-left: 1.5rem;
+}
+.view-title.hidden { display: none; }
+
 /* Face thumbnail grid */
 .face-grid {
   display: grid;
@@ -186,6 +193,7 @@
   background: rgba(0,0,0,0.7);
   color: #fff;
   font-size: 0.75rem;
+  line-height: normal;
   padding: 1px 4px;
   border-radius: 2px;
   white-space: nowrap;
@@ -451,19 +459,38 @@
 }
 .photo-nav-btn {
   flex-shrink: 0;
-  width: 2.2rem;
-  height: 2.2rem;
-  border: 1px solid var(--pico-muted-border-color);
-  border-radius: 50%;
-  background: var(--pico-card-background-color);
+  width: 1.8rem;
+  align-self: stretch;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
   cursor: pointer;
-  font-size: 1rem;
+  font-size: 1.4rem;
   line-height: 1;
   padding: 0;
-  color: var(--pico-color);
-  margin-top: 0.5rem;
+  color: #4062b4 !important;
+  margin: 0;
 }
+.photo-nav-btn { transform: scaleY(2); }
+.photo-nav-btn:hover:not(:disabled) { background: rgba(99, 155, 255, 0.1); }
+.photo-nav-btn:focus { outline: none; box-shadow: none !important; }
 .photo-nav-btn:disabled { opacity: 0.25; cursor: default; }
+
+.preview-toggle-btn {
+  flex-shrink: 0;
+  align-self: stretch;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1.5rem;
+  line-height: 1;
+  padding: 0 0.35rem;
+  color: #4062b4 !important;
+  margin: 0;
+}
+.preview-toggle-btn:hover { background: rgba(99, 155, 255, 0.1); }
+.preview-toggle-btn:focus { outline: none; box-shadow: none !important; }
 .gallery-info {
   font-size: 0.8rem;
   color: var(--pico-muted-color);
@@ -586,3 +613,66 @@
   background: var(--pico-primary-background);
   color: var(--pico-primary-inverse);
 }
+
+/* ── Photos fixed layout ──────────────────────────────────────────────────── */
+body.photos-active { height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+body.photos-active .top-nav { flex-shrink: 0; margin-bottom: 0; }
+body.photos-active .app-layout { flex: 1; min-height: 0; align-items: stretch; overflow: hidden; }
+body.photos-active #sidebar { position: static; overflow-y: auto; align-self: stretch; }
+body.photos-active #app { display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+
+.photos-layout { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+
+/* Large photo area */
+.photos-main-area {
+  flex: 1; min-height: 0; overflow: hidden; position: relative;
+  display: flex; align-items: center; justify-content: center;
+}
+.photos-main-area .photo-overlay-wrap {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  max-height: 100%;
+  line-height: 0;
+}
+.photos-main-area img.main-photo { max-width: 100%; max-height: 100%; display: block; }
+
+/* Gradient info overlay at photo bottom */
+.photos-info-overlay {
+  position: absolute; bottom: 0; left: 0; right: 0; pointer-events: none;
+  background: linear-gradient(transparent, rgba(0,0,0,0.55));
+  color: #ddd; font-size: 0.72rem;
+  padding: 1.5rem 0.5rem 0.3rem;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* Preview band */
+.photos-preview-band {
+  flex-shrink: 0; height: 72px; position: relative;
+  display: flex; align-items: center; gap: 4px; padding: 0 4px;
+  border-top: 1px solid var(--pico-muted-border-color);
+  background: var(--pico-card-background-color);
+}
+.preview-thumbs-area { flex: 1; min-width: 0; overflow: hidden; height: 100%; display: flex; align-items: center; }
+.photos-preview-band .gallery-thumbs { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; }
+
+/* Expanded popup — grows upward from preview band */
+.preview-popup {
+  position: absolute; bottom: 100%; left: 0; right: 0;
+  background: var(--pico-card-background-color);
+  border: 1px solid var(--pico-muted-border-color);
+  border-bottom: none; border-radius: 6px 6px 0 0;
+  overflow-y: auto; z-index: 50; padding: 4px;
+}
+.preview-popup .gallery-thumbs { flex-wrap: wrap; overflow-x: visible; }
+
+/* Faces band */
+.photos-faces-band {
+  flex-shrink: 0; height: 84px; overflow-x: auto; overflow-y: hidden;
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 6px;
+  border-top: 1px solid var(--pico-muted-border-color);
+  background: var(--pico-card-background-color);
+}
+.photos-faces-band .face-cell { flex-shrink: 0; }
+.photos-faces-band .face-cell img { width: 66px; height: 66px; display: block; }
