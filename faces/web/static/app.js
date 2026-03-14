@@ -114,12 +114,12 @@ function _openTimelinePopup(paneEl) {
     return arr.reduce((best, x) => (Math.abs(x - val) < Math.abs(best - val) ? x : best), arr[0]);
   }
 
-  // Shift band so its active item's center aligns with pane center
-  function alignBand(band) {
+  // Shift band so its active item's center aligns with targetY
+  function alignBand(band, targetY) {
     requestAnimationFrame(() => {
       const active = band.querySelector(".tl-active");
       if (!active) return;
-      const shift = paneCenter - (active.offsetTop + active.offsetHeight / 2);
+      const shift = targetY - (active.offsetTop + active.offsetHeight / 2);
       band.style.transform = `translateY(${shift}px)`;
     });
   }
@@ -132,7 +132,7 @@ function _openTimelinePopup(paneEl) {
     return ul;
   }
 
-  function fillBand(band, items, selectedVal, onHover) {
+  function fillBand(band, items, selectedVal, onHover, targetY = paneCenter) {
     band.innerHTML = "";
     items.forEach(item => {
       const li = document.createElement("li");
@@ -142,11 +142,12 @@ function _openTimelinePopup(paneEl) {
       li.addEventListener("mouseenter", () => {
         band.querySelectorAll("li").forEach(l => l.classList.remove("tl-active"));
         li.classList.add("tl-active");
-        onHover(item);
+        const r = li.getBoundingClientRect();
+        onHover(item, r.top + r.height / 2);
       });
       band.appendChild(li);
     });
-    alignBand(band);
+    alignBand(band, targetY);
   }
 
   const yearBand  = makeBand("tl-band-year");
@@ -167,22 +168,22 @@ function _openTimelinePopup(paneEl) {
     }, 160);
   }
 
-  function onHoverYear(y) {
+  function onHoverYear(y, itemY) {
     tlY = y;
     const months = getMonths(y);
     tlM = selectClosest(months, tlM);
     const days = getDays(y, tlM);
     tlD = selectClosest(days, tlD);
-    fillBand(monthBand, months, tlM, onHoverMonth);
-    fillBand(dayBand, days, tlD, onHoverDay);
+    fillBand(monthBand, months, tlM, onHoverMonth, itemY);
+    fillBand(dayBand, days, tlD, onHoverDay, itemY);
     scheduleDayLoad();
   }
 
-  function onHoverMonth(m) {
+  function onHoverMonth(m, itemY) {
     tlM = m;
     const days = getDays(tlY, m);
     tlD = selectClosest(days, tlD);
-    fillBand(dayBand, days, tlD, onHoverDay);
+    fillBand(dayBand, days, tlD, onHoverDay, itemY);
     scheduleDayLoad();
   }
 
@@ -191,9 +192,9 @@ function _openTimelinePopup(paneEl) {
     scheduleDayLoad();
   }
 
-  // Initial population
-  fillBand(yearBand,  _dayIndex.years,  tlY, onHoverYear);
-  fillBand(monthBand, getMonths(tlY),   tlM, onHoverMonth);
+  // Initial population — all three bands align to pane center
+  fillBand(yearBand,  _dayIndex.years,   tlY, onHoverYear);
+  fillBand(monthBand, getMonths(tlY),    tlM, onHoverMonth);
   fillBand(dayBand,   getDays(tlY, tlM), tlD, onHoverDay);
 
   // Clicking any band item: load immediately and close
