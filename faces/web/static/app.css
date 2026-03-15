@@ -521,17 +521,26 @@
   padding: 0.1rem 0.45rem;
   margin: 0;
 }
+.gallery-thumb-wrap {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 3px;
+  cursor: pointer;
+}
 .gallery-thumb {
   width: 80px;
   height: 60px;
   object-fit: cover;
-  cursor: pointer;
-  border: 2px solid transparent;
-  border-radius: 2px;
-  opacity: 0.65;
+  border: 2px solid var(--pico-muted-border-color);
+  border-radius: 4px;
+  box-shadow: none;
+  transition: border-color 0.15s, border-radius 0.15s, box-shadow 0.15s;
 }
-.gallery-thumb:hover  { opacity: 1; }
-.gallery-thumb.active { border-color: var(--pico-primary); opacity: 1; }
+.gallery-thumb-wrap.active .gallery-thumb {
+  border-color: var(--pico-primary);
+  border-radius: 8px;
+  box-shadow: 0 0 0 2px var(--pico-primary-hover);
+}
 
 /* Timeline navigation */
 .tl-pane {
@@ -647,7 +656,7 @@ body.photos-active #app { display: flex; flex-direction: column; overflow: hidde
 
 /* Preview band */
 .photos-preview-band {
-  flex-shrink: 0; height: 72px; position: relative;
+  flex-shrink: 0; height: 74px; position: relative;
   display: flex; align-items: center; gap: 4px; padding: 0 4px;
   border-top: 1px solid var(--pico-muted-border-color);
   background: var(--pico-card-background-color);

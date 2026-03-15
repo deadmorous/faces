@@ -1062,8 +1062,10 @@ function _rebuildThumbStrip(renderIndices, currentIdx) {
   let thumbHtml = "";
   for (const i of renderIndices) {
     const p = _photosList[i];
-    thumbHtml += `<img src="${p.photo_url}" class="gallery-thumb${i === currentIdx ? " active" : ""}"
-      data-idx="${i}" loading="lazy" title="${escHtml(p.path)}" width="80" height="60">`;
+    thumbHtml += `<span class="gallery-thumb-wrap${i === currentIdx ? " active" : ""}" data-idx="${i}">
+      <img src="${p.photo_url}" class="gallery-thumb"
+        loading="lazy" title="${escHtml(p.path)}" width="80" height="60">
+    </span>`;
   }
   document.getElementById("gallery-thumbs").innerHTML = thumbHtml;
   const popupStrip = document.querySelector("#preview-popup .gallery-thumbs");
@@ -1113,11 +1115,11 @@ function _initPhotosGallery(currentIdx, detail) {
 
   // Event delegation — thumbnail clicks (strip and popup both handled here once)
   document.getElementById("gallery-thumbs").addEventListener("click", e => {
-    const thumb = e.target.closest(".gallery-thumb");
+    const thumb = e.target.closest(".gallery-thumb-wrap");
     if (thumb) { _closeTimelinePopup(); _loadPhotoAtIdx(parseInt(thumb.dataset.idx, 10)); }
   });
   document.getElementById("preview-popup").addEventListener("click", e => {
-    const thumb = e.target.closest(".gallery-thumb");
+    const thumb = e.target.closest(".gallery-thumb-wrap");
     if (thumb) { _closeTimelinePopup(); _loadPhotoAtIdx(parseInt(thumb.dataset.idx, 10)); }
   });
 
@@ -1205,12 +1207,12 @@ function _updatePhotosGallery(currentIdx, detail) {
     _galleryStripKey = newStripKey;
   } else {
     // Just move the active class
-    document.querySelectorAll("#gallery-thumbs .gallery-thumb, #preview-popup .gallery-thumb")
+    document.querySelectorAll("#gallery-thumbs .gallery-thumb-wrap, #preview-popup .gallery-thumb-wrap")
       .forEach(t => t.classList.toggle("active", parseInt(t.dataset.idx) === currentIdx));
   }
 
   // 5. Scroll active thumb into view (strip persists → scrollLeft is reliable)
-  document.querySelector("#gallery-thumbs .gallery-thumb.active")
+  document.querySelector("#gallery-thumbs .gallery-thumb-wrap.active")
     ?.scrollIntoView({ block: "nearest", inline: "nearest" });
 
   // 6. Faces band
