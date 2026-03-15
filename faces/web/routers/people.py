@@ -45,9 +45,46 @@ def people_cache_to_list(cache: PeopleCache) -> list[Person]:
 
 
 @router.get("", response_model=list[Person], summary="List all named people")
-def list_people(request: Request):
-    """Return the cached people list (rebuilt after every label change)."""
-    return people_cache_to_list(request.app.state.people_cache)
+def list_people(
+    request: Request,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    db: Annotated[Database, Depends(get_db)] = ...,
+):
+    """Return the people list, optionally filtered by photo date."""
+    if not since and not until:
+        return people_cache_to_list(request.app.state.people_cache)
+
+    try:
+        since_ts = parse_date(since) if since else None
+        until_ts = parse_date(until, end_of_period=True) if until else None
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    rows = db.faces.search().limit(10_000_000).to_list()
+    photo_dates = load_photo_dates(db)
+
+    def _passes(md5: str) -> bool:
+        mt = photo_dates.get(md5)
+        if mt is None:
+            return True
+        if since_ts and mt < since_ts:
+            return False
+        if until_ts and mt >= until_ts:
+            return False
+        return True
+
+    cache: PeopleCache = {}
+    for row in rows:
+        name = row.get("name")
+        if not name or not _passes(row["md5"]):
+            continue
+        if name not in cache:
+            cache[name] = {"face_count": 0, "photo_md5s": set()}
+        cache[name]["face_count"] += 1
+        cache[name]["photo_md5s"].add(row["md5"])
+
+    return people_cache_to_list(cache)
 
 
 @router.get("/{name}", response_model=PersonDetail, summary="All photos containing a person")

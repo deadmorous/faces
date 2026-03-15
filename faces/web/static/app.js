@@ -412,7 +412,7 @@ function setSidebarView(view) {
   const showThresh     = ["classify", "similar"].includes(view);
   const showRelSize    = ["unlabeled", "classify", "similar"].includes(view);
   const showAlgo       = view === "classify";
-  const showDateRange  = ["unlabeled", "classify", "similar", "photos", "personFaces"].includes(view);
+  const showDateRange  = ["unlabeled", "classify", "similar", "photos", "people", "personFaces"].includes(view);
   const showRefRange   = view === "classify";
   const showFaces      = view === "photos";
   const showLabels     = view === "photos";
@@ -437,6 +437,7 @@ function rerenderCurrentView() {
       _currentViewArgs.md5, _currentViewArgs.bboxParam,
       _currentViewArgs.unlabeledOnly); break;
     case "photos":       renderPhotos(); break;
+    case "people":       renderPeople(); break;
     case "personFaces":  renderPersonFaces(_currentViewArgs.name, _currentViewArgs.page || 1); break;
   }
 }
@@ -679,7 +680,7 @@ function route() {
         setSidebarView("personFaces");
         renderPersonFaces(_currentViewArgs.name, pg);
       } else {
-        _currentView = null; _currentViewArgs = {};   // people list — not date-filtered
+        _currentView = "people"; _currentViewArgs = {};
         setSidebarView("people");
         renderPeople();
       }
@@ -1268,7 +1269,8 @@ async function renderPeople() {
   showSpinner();
   let data;
   try {
-    data = await apiFetch("/api/people");
+    const dqs = dateQs();
+    data = await apiFetch(dqs ? `/api/people?${dqs}` : "/api/people");
   } catch (e) {
     showError(e.message);
     return;
