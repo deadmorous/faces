@@ -636,6 +636,9 @@ function route() {
   document.body.classList.remove("photos-active");
   // Teardown current view
   if (_cleanup) { _cleanup(); _cleanup = null; }
+  const _vt = document.getElementById("view-title");
+  _vt.innerHTML = "";
+  _vt.classList.add("hidden");
 
   const hash = location.hash || "#/unlabeled";
   const parts = hash.replace(/^#\//, "").split("/");
@@ -718,7 +721,11 @@ async function renderUnlabeled(page = 1) {
   const app = document.getElementById("app");
   const totalPages = Math.ceil(data.total / 100);
 
-  let html = `<h2>Unlabeled faces <span class="badge">${data.total}</span></h2>`;
+  const viewTitleEl = document.getElementById("view-title");
+  viewTitleEl.innerHTML = `Unlabeled <span class="badge">${data.total}</span>`;
+  viewTitleEl.classList.remove("hidden");
+
+  let html = "";
 
   if (data.faces.length === 0) {
     html += `<p>No unlabeled faces.</p>`;
@@ -757,6 +764,9 @@ let _classifyPerson = localStorage.getItem("classifyPerson")  || null;
 
 async function renderClassify(person = null) {
   if (person !== null) { _classifyPerson = person; localStorage.setItem("classifyPerson", person); }
+  const viewTitleEl = document.getElementById("view-title");
+  viewTitleEl.textContent = "Classify";
+  viewTitleEl.classList.remove("hidden");
   showSpinner();
 
   let algorithms;
@@ -803,9 +813,7 @@ async function renderClassify(person = null) {
   const app = document.getElementById("app");
 
   if (!_classifyPerson) {
-    app.innerHTML = `
-      <h2>Classify</h2>
-      <p>No classify candidates found. Run <code>scan</code> first, then label some faces.</p>`;
+    app.innerHTML = `<p>No classify candidates found. Run <code>scan</code> first, then label some faces.</p>`;
     return;
   }
 
@@ -822,7 +830,6 @@ async function renderClassify(person = null) {
   const selected = new Set();
 
   let html = `
-    <h2>Classify</h2>
     <div style="display:flex;align-items:center;gap:0.75rem;margin:0 0 0.75rem;">
       <label style="white-space:nowrap;margin:0;">Person:</label>
       <select id="person-select" style="flex:1;margin:0;">${personOptions}</select>
@@ -1070,7 +1077,7 @@ function _initPhotosGallery(currentIdx, detail) {
 
   // Update view title in nav
   const viewTitleEl = document.getElementById("view-title");
-  viewTitleEl.textContent = `Photos (${n})`;
+  viewTitleEl.innerHTML = `Photos <span class="badge">${n}</span>`;
   viewTitleEl.classList.remove("hidden");
 
   const html = `<div class="photos-layout">
@@ -1273,12 +1280,16 @@ async function renderPeople() {
   }
 
   const app = document.getElementById("app");
+  const viewTitleEl = document.getElementById("view-title");
+  viewTitleEl.innerHTML = `People <span class="badge">${data.length}</span>`;
+  viewTitleEl.classList.remove("hidden");
+
   if (!data.length) {
-    app.innerHTML = `<h2>People</h2><p>No labeled people yet. Use <a href="#/classify">Classify</a> to add labels.</p>`;
+    app.innerHTML = `<p>No labeled people yet. Use <a href="#/classify">Classify</a> to add labels.</p>`;
     return;
   }
 
-  let html = `<h2>People <span class="badge">${data.length}</span></h2><ul class="people-list">`;
+  let html = `<ul class="people-list">`;
   data.forEach(p => {
     html += `
       <li>
@@ -1307,6 +1318,9 @@ async function renderPersonDetail(name, page = 1) {
   const app = document.getElementById("app");
   const totalPages = Math.ceil(data.total / data.page_size);
   const base = `#/people/${encodeURIComponent(name)}`;
+  const viewTitleEl = document.getElementById("view-title");
+  viewTitleEl.innerHTML = `${escHtml(data.name)} <span class="badge">${data.total} photo${data.total !== 1 ? "s" : ""}</span>`;
+  viewTitleEl.classList.remove("hidden");
 
   function pageNav() {
     if (totalPages <= 1) return "";
@@ -1320,7 +1334,6 @@ async function renderPersonDetail(name, page = 1) {
 
   let html = `
     <p class="breadcrumb"><a href="#/people">← People</a></p>
-    <h2>${escHtml(data.name)} <span class="badge">${data.total} photo${data.total !== 1 ? "s" : ""}</span></h2>
     ${pageNav()}
     <ul class="photo-list">`;
   data.photos.forEach(p => {
@@ -1363,6 +1376,9 @@ async function renderPersonFaces(name, page = 1) {
   const selected = new Set(data.faces.map(f => `${f.md5}:${bboxToQuery(f.bbox)}`));
   const totalPages = Math.ceil(data.total / PERSON_FACES_PAGE_SIZE);
   const app = document.getElementById("app");
+  const viewTitleEl = document.getElementById("view-title");
+  viewTitleEl.innerHTML = `${escHtml(name)} <span class="badge">${data.total} faces</span>`;
+  viewTitleEl.classList.remove("hidden");
 
   function pageNav() {
     if (totalPages <= 1) return "";
@@ -1377,7 +1393,6 @@ async function renderPersonFaces(name, page = 1) {
 
   let html = `
     <p class="breadcrumb"><a href="#/people">← People</a></p>
-    <h2>${escHtml(name)} <span class="badge">${data.total} faces</span></h2>
     <div style="display:flex;align-items:center;gap:0.75rem;margin:0.5rem 0;">
       <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;margin:0;">
         <input type="checkbox" id="select-all-pf" checked> Select all
