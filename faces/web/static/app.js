@@ -1093,7 +1093,21 @@ function _renderPhotosGallery(currentIdx, detail) {
   html += `</div>`;
 
   html += `</div>`;  // close photos-layout
+
   document.getElementById("app").innerHTML = html;
+
+  // TODO: auto-scroll active thumb into view on < / > navigation without
+  // disrupting clicks on visible thumbs. See session_notes/2026-03-15_preview-strip-autoscroll.md
+  // for a summary of attempted approaches and remaining unknowns.
+  //
+  // const _prevStripScroll = document.getElementById("gallery-thumbs")?.scrollLeft ?? 0;
+  // ...save before innerHTML = html, then after:
+  // const _strip = document.getElementById("gallery-thumbs");
+  // if (_strip) {
+  //   _strip.scrollLeft = _prevStripScroll;
+  //   _strip.querySelector(".gallery-thumb.active")
+  //     ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  // }
 
   // Popup max-height = half the photo area height
   function _updatePopupMaxHeight() {
