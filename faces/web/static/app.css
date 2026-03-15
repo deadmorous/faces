@@ -471,7 +471,7 @@
   color: #4062b4 !important;
   margin: 0;
 }
-.photo-nav-btn { transform: scaleY(2); }
+.photo-nav-btn > span { display: inline-block; transform: scaleY(2); }
 .photo-nav-btn:hover:not(:disabled) { background: rgba(99, 155, 255, 0.1); }
 .photo-nav-btn:focus { outline: none; box-shadow: none !important; }
 .photo-nav-btn:disabled { opacity: 0.25; cursor: default; }
