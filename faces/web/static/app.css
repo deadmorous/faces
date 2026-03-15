@@ -321,11 +321,6 @@
   color: var(--pico-muted-color);
 }
 
-.manage-link {
-  font-size: 0.8rem;
-  margin-left: 0.75rem;
-  color: var(--pico-muted-color);
-}
 
 /* Rectangular selection overlay */
 .rect-select {

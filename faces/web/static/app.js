@@ -412,7 +412,7 @@ function setSidebarView(view) {
   const showThresh     = ["classify", "similar"].includes(view);
   const showRelSize    = ["unlabeled", "classify", "similar"].includes(view);
   const showAlgo       = view === "classify";
-  const showDateRange  = ["unlabeled", "classify", "similar", "photos", "personDetail", "personFaces"].includes(view);
+  const showDateRange  = ["unlabeled", "classify", "similar", "photos", "personFaces"].includes(view);
   const showRefRange   = view === "classify";
   const showFaces      = view === "photos";
   const showLabels     = view === "photos";
@@ -437,7 +437,6 @@ function rerenderCurrentView() {
       _currentViewArgs.md5, _currentViewArgs.bboxParam,
       _currentViewArgs.unlabeledOnly); break;
     case "photos":       renderPhotos(); break;
-    case "personDetail": renderPersonDetail(_currentViewArgs.name, _currentViewArgs.page || 1); break;
     case "personFaces":  renderPersonFaces(_currentViewArgs.name, _currentViewArgs.page || 1); break;
   }
 }
@@ -672,19 +671,13 @@ function route() {
       }
       break;
     case "people":
-      if (parts[1] && parts[2] === "faces") {
-        const pg = parts[3] === "page" ? parseInt(parts[4], 10) || 1 : 1;
+      if (parts[1]) {
+        const pg = parts[2] === "faces" && parts[3] === "page" ? parseInt(parts[4], 10) || 1
+                 : parts[2] === "page" ? parseInt(parts[3], 10) || 1
+                 : 1;
         _currentView = "personFaces"; _currentViewArgs = { name: decodeURIComponent(parts[1]), page: pg };
         setSidebarView("personFaces");
         renderPersonFaces(_currentViewArgs.name, pg);
-      } else if (parts[1] && parts[2] === "page") {
-        _currentView = "personDetail"; _currentViewArgs = { name: decodeURIComponent(parts[1]), page: parseInt(parts[3], 10) || 1 };
-        setSidebarView("personDetail");
-        renderPersonDetail(_currentViewArgs.name, _currentViewArgs.page);
-      } else if (parts[1]) {
-        _currentView = "personDetail"; _currentViewArgs = { name: decodeURIComponent(parts[1]), page: 1 };
-        setSidebarView("personDetail");
-        renderPersonDetail(_currentViewArgs.name, 1);
       } else {
         _currentView = null; _currentViewArgs = {};   // people list — not date-filtered
         setSidebarView("people");
@@ -1297,63 +1290,10 @@ async function renderPeople() {
       <li>
         <a href="#/people/${encodeURIComponent(p.name)}">${escHtml(p.name)}</a>
         <span class="person-meta"> — ${p.face_count} face${p.face_count !== 1 ? "s" : ""}, ${p.photo_count} photo${p.photo_count !== 1 ? "s" : ""}</span>
-        <a href="#/people/${encodeURIComponent(p.name)}/faces" class="manage-link">manage</a>
       </li>`;
   });
   html += `</ul>`;
   app.innerHTML = html;
-}
-
-// ---------------------------------------------------------------------------
-// View: Person Detail
-// ---------------------------------------------------------------------------
-async function renderPersonDetail(name, page = 1) {
-  showSpinner();
-  let data;
-  try {
-    data = await apiFetch(appendQs(`/api/people/${encodeURIComponent(name)}?page=${page}&page_size=50`, dateQs()));
-  } catch (e) {
-    showError(e.message);
-    return;
-  }
-
-  const app = document.getElementById("app");
-  const totalPages = Math.ceil(data.total / data.page_size);
-  const base = `#/people/${encodeURIComponent(name)}`;
-  const viewTitleEl = document.getElementById("view-title");
-  viewTitleEl.innerHTML = `${escHtml(data.name)} <span class="badge">${data.total} photo${data.total !== 1 ? "s" : ""}</span>`;
-  viewTitleEl.classList.remove("hidden");
-
-  function pageNav() {
-    if (totalPages <= 1) return "";
-    let nav = `<nav class="pagination">`;
-    if (page > 1) nav += `<a href="${base}/page/${page - 1}">← Prev</a>`;
-    nav += `<span>Page ${page} / ${totalPages}</span>`;
-    if (page < totalPages) nav += `<a href="${base}/page/${page + 1}">Next →</a>`;
-    nav += `</nav>`;
-    return nav;
-  }
-
-  let html = `
-    <p class="breadcrumb"><a href="#/people">← People</a></p>
-    ${pageNav()}
-    <ul class="photo-list">`;
-  data.photos.forEach(p => {
-    html += `
-      <li class="photo-list-item" data-md5="${p.md5}">
-        <img src="${p.photo_url}" loading="lazy" alt="" width="80" height="60">
-        <div class="photo-meta">
-          <div class="photo-path">${escHtml(p.path)}</div>
-          <div class="photo-info">${formatDate(p.exif_date)}</div>
-        </div>
-      </li>`;
-  });
-  html += `</ul>${pageNav()}`;
-  app.innerHTML = html;
-
-  app.querySelectorAll(".photo-list-item").forEach(li => {
-    li.addEventListener("click", () => { location.hash = `#/photos/${li.dataset.md5}`; });
-  });
 }
 
 // ---------------------------------------------------------------------------
