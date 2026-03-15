@@ -1583,7 +1583,7 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = true) {
     <div class="similar-seed">
       <img src="${data.seed.img_url}" class="seed-thumb" alt="">
       <div>
-        <div>${escHtml(data.seed.photo_path)} <a href="#/photos/${data.seed.md5}" title="Open photo">↗</a></div>
+        <div>${escHtml(data.seed.photo_path)} <a href="#/photos/${data.seed.md5}" target="_blank" title="Open photo">↗</a></div>
         ${seedName}
         <label style="display:flex;align-items:center;gap:0.5rem;margin-top:0.5rem;cursor:pointer;">
           <input type="checkbox" id="unlabeled-only"${unlabeledOnly ? " checked" : ""}> Unlabeled only
