@@ -1547,6 +1547,9 @@ async function renderPersonFaces(name, page = 1) {
 // ---------------------------------------------------------------------------
 async function renderSimilar(md5, bboxParam, unlabeledOnly = true) {
   _currentViewArgs = { md5, bboxParam, unlabeledOnly };
+  const viewTitleEl = document.getElementById("view-title");
+  viewTitleEl.textContent = "Similar faces";
+  viewTitleEl.classList.remove("hidden");
   showSpinner();
   const bboxQuery = bboxParam.replace(/_/g, ",");
   let data, people;
@@ -1579,7 +1582,6 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = true) {
 
   let html = `
     <p class="breadcrumb"><a href="#" onclick="history.back();return false;">← Back</a></p>
-    <h2>Similar faces</h2>
     <div class="similar-seed">
       <img src="${data.seed.img_url}" class="seed-thumb" alt="">
       <div>
