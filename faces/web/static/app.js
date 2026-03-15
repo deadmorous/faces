@@ -1130,15 +1130,19 @@ function _renderPhotosGallery(currentIdx, detail) {
     wrapEl.querySelectorAll(".bbox-overlay").forEach(el => el.remove());
     const nw = imgEl.naturalWidth, nh = imgEl.naturalHeight;
     if (!nw || !nh) return;
-    const sx = imgEl.clientWidth / nw, sy = imgEl.clientHeight / nh;
+    // object-fit:contain — image is letterboxed inside the wrap; compute the
+    // actual rendered image rect within the wrap.
+    const scale = Math.min(imgEl.clientWidth / nw, imgEl.clientHeight / nh);
+    const ox = (imgEl.clientWidth  - nw * scale) / 2;  // horizontal offset
+    const oy = (imgEl.clientHeight - nh * scale) / 2;  // vertical offset
     detail.faces.forEach(face => {
       const [x1, y1, x2, y2] = transformBboxForDisplay(face.bbox, detail.exif_orientation, nw, nh);
       const div = document.createElement("div");
       div.className = "bbox-overlay";
-      div.style.left   = x1 * sx + "px";
-      div.style.top    = y1 * sy + "px";
-      div.style.width  = (x2 - x1) * sx + "px";
-      div.style.height = (y2 - y1) * sy + "px";
+      div.style.left   = (ox + x1 * scale) + "px";
+      div.style.top    = (oy + y1 * scale) + "px";
+      div.style.width  = ((x2 - x1) * scale) + "px";
+      div.style.height = ((y2 - y1) * scale) + "px";
       if (face.sticky_name && !["__nonface__", "__foreign__"].includes(face.sticky_name)) {
         const lbl = document.createElement("div");
         lbl.className = "bbox-label";
