@@ -1317,7 +1317,7 @@ async function renderPersonFaces(name, page = 1) {
   }
   const knownNames = people.map(p => p.name).filter(n => !SPECIAL_LABELS.includes(n));
 
-  const selected = new Set(data.faces.map(f => `${f.md5}:${bboxToQuery(f.bbox)}`));
+  const selected = new Set();
   const totalPages = Math.ceil(data.total / PERSON_FACES_PAGE_SIZE);
   const app = document.getElementById("app");
   const viewTitleEl = document.getElementById("view-title");
@@ -1339,14 +1339,14 @@ async function renderPersonFaces(name, page = 1) {
     <p class="breadcrumb"><a href="#/people">← People</a></p>
     <div style="display:flex;align-items:center;gap:0.75rem;margin:0.5rem 0;">
       <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;margin:0;">
-        <input type="checkbox" id="select-all-pf" checked> Select all
+        <input type="checkbox" id="select-all-pf"> Select all
       </label>
     </div>
     ${pageNav()}
     <div class="face-grid">
       ${data.faces.map((f, fi) => `
         <div class="face-cell">
-          <img src="${f.img_url}" data-fi="${fi}" class="selected" loading="lazy"
+          <img src="${f.img_url}" data-fi="${fi}" class="deselected" loading="lazy"
                title="${escHtml(f.photo_path)}">
           <a href="#/photos/${f.md5}" target="_blank" class="face-link-btn" title="Open photo">↗</a>
           <a href="#/similar/${f.md5}/${bboxToPathParam(f.bbox)}" class="similar-link-btn" title="Find similar">≈</a>
