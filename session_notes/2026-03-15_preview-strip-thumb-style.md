@@ -56,21 +56,33 @@ matters.
 
 ---
 
-## Open questions / possible paths forward
+## Solution — `<span>` wrapper with padding (commit 81e8ba3)
 
-1. **Change the overflow on `.gallery-thumbs`**: removing `overflow-y: hidden`
-   from `.photos-preview-band .gallery-thumbs` would let the flex container
-   paint outside its own box. The browser normalises `overflow-x: auto` +
-   no `overflow-y` to `overflow-y: auto`, but since content (60 px) is less
-   than the container (72 px), no actual scrollbar appears and no visual
-   clipping occurs. The `box-shadow` should then only hit the
-   `.preview-thumbs-area` overflow boundary (8 px of headroom → fine).
-   *Not yet attempted.*
+Each `<img class="gallery-thumb">` is wrapped in
+`<span class="gallery-thumb-wrap [active]" data-idx="…">`.  The span has
+`padding: 3px`, making it 66 px tall (60 px image + 3 px × 2).  The
+`.gallery-thumbs` flex container now sizes to the spans (66 px), so
+`overflow-y: hidden` clips at 66 px.  The box-shadow (2 px spread) extends at
+most 2 px outside the image — still within the 3 px span padding — and is
+therefore never clipped.
 
-2. **Wrap each thumb in a `<div>`**: style the wrapper div as the selection
-   indicator (border/shadow on the div, not on the img). The wrapper can be
-   given a larger box (e.g. 64 px tall) without clipping the image itself.
+```
+.preview-thumbs-area        overflow: hidden; height: 100% (74px)
+  └─ .gallery-thumbs        overflow-x: auto; overflow-y: hidden (clips at 66px)
+       └─ span.gallery-thumb-wrap  padding: 3px  → 66px tall  ← new wrapper
+            └─ img.gallery-thumb   60px + box-shadow (2px) fits inside span
+```
 
-3. **Accept a border-only style**: drop the outer glow entirely; just change
-   border colour, border-radius, and perhaps border-width for the active state.
-   Matches the classify look partially, avoids all clipping issues.
+The active class and `data-idx` live on the span; `.gallery-thumb` retains
+only the visual image styles.  Active state:
+
+```css
+.gallery-thumb-wrap.active .gallery-thumb {
+  border-color: var(--pico-primary);
+  border-radius: 8px;
+  box-shadow: 0 0 0 2px var(--pico-primary-hover);
+}
+```
+
+Band height bumped 72 → 74 px for a little breathing room around the 66 px
+wrapper row.
