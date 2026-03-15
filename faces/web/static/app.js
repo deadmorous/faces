@@ -640,7 +640,7 @@ function route() {
   _vt.innerHTML = "";
   _vt.classList.add("hidden");
 
-  const hash = location.hash || "#/unlabeled";
+  const hash = location.hash || "#/photos";
   const parts = hash.replace(/^#\//, "").split("/");
 
   // Update active nav link
