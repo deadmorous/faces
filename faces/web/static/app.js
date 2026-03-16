@@ -362,7 +362,6 @@ function _openDirtreePopup(paneEl) {
     const cur = selectedPath[depth];
     const selVal = cur && items.includes(cur) ? cur : items[0];
     selectedPath[depth] = selVal;
-    selectedPath.length = depth + 1;
 
     const band = document.createElement("ul");
     band.className = "tl-band";
@@ -375,6 +374,7 @@ function _openDirtreePopup(paneEl) {
       li.dataset.val = item;
       if (item === selVal) li.classList.add("tl-active");
       li.addEventListener("mouseenter", () => {
+        if (selectedPath[depth] === item) return; // already selected, keep deeper bands intact
         activateInBand(band, item);
         selectedPath[depth] = item;
         selectedPath.length = depth + 1;
@@ -1238,18 +1238,32 @@ function _renderPhotosGallery(currentIdx, detail) {
   }
 }
 
-function _computeStripKey(currentIdx, useDayView) {
+function _photoDir(path) {
+  if (!path) return "";
+  const slash = path.lastIndexOf("/");
+  return slash >= 0 ? path.slice(0, slash) : "";
+}
+
+function _computeStripKey(currentIdx, useDayView, useDirView) {
   if (useDayView) {
     const dp = _photoDateParts(_photosList[currentIdx].exif_date);
     return `${dp.y}-${dp.m}-${dp.d}`;
   }
+  if (useDirView) return "dir:" + _photoDir(_photosList[currentIdx]?.path);
   return Math.floor(currentIdx / THUMB_PAGE_SIZE);
 }
 
-function _computeRenderIndices(currentIdx, useDayView) {
+function _computeRenderIndices(currentIdx, useDayView, useDirView) {
   if (useDayView) {
     const dp = _photoDateParts(_photosList[currentIdx].exif_date);
     return _dayIndex.byYMD[dp.y]?.[dp.m]?.[dp.d] ?? [currentIdx];
+  }
+  if (useDirView) {
+    const dir = _photoDir(_photosList[currentIdx]?.path);
+    return _photosList.reduce((acc, p, i) => {
+      if (_photoDir(p.path) === dir) acc.push(i);
+      return acc;
+    }, []);
   }
   const thumbPage  = Math.floor(currentIdx / THUMB_PAGE_SIZE);
   const thumbStart = thumbPage * THUMB_PAGE_SIZE;
@@ -1275,8 +1289,11 @@ function _rebuildThumbStrip(renderIndices, currentIdx) {
 
 function _initPhotosGallery(currentIdx, detail) {
   const n = _photosList.length;
-  const useDayView = _params.photoSort === "date_asc" && _dayIndex
+  const useDayView  = _params.photoSort === "date_asc" && _dayIndex
     && _photosList[currentIdx]?.exif_date;
+  const useDirView  = _params.photoSort === "path_asc" && _dirTree
+    && _photosList[currentIdx]?.path;
+  const useGroupView = useDayView || useDirView;
 
   // Update view title in nav
   const viewTitleEl = document.getElementById("view-title");
@@ -1294,8 +1311,8 @@ function _initPhotosGallery(currentIdx, detail) {
       <button class="photo-nav-btn" id="gallery-prev"><span><</span></button>
       <div class="preview-thumbs-area"><div class="gallery-thumbs" id="gallery-thumbs"></div></div>
       <button class="photo-nav-btn" id="gallery-next"><span>></span></button>
-      <button class="preview-toggle-btn" id="preview-toggle"${useDayView ? "" : ' style="display:none"'}>${_params.previewExpanded ? "▼" : "▲"}</button>
-      <div class="preview-popup" id="preview-popup"${(useDayView && _params.previewExpanded) ? "" : ' style="display:none"'}>
+      <button class="preview-toggle-btn" id="preview-toggle"${useGroupView ? "" : ' style="display:none"'}>${_params.previewExpanded ? "▼" : "▲"}</button>
+      <div class="preview-popup" id="preview-popup"${(useGroupView && _params.previewExpanded) ? "" : ' style="display:none"'}>
         <div class="gallery-thumbs expanded"></div>
       </div>
     </div>
@@ -1317,11 +1334,11 @@ function _initPhotosGallery(currentIdx, detail) {
   // Event delegation — thumbnail clicks (strip and popup both handled here once)
   document.getElementById("gallery-thumbs").addEventListener("click", e => {
     const thumb = e.target.closest(".gallery-thumb-wrap");
-    if (thumb) { _closeTimelinePopup(); _loadPhotoAtIdx(parseInt(thumb.dataset.idx, 10)); }
+    if (thumb) { _closeTimelinePopup(); _closeDirtreePopup(); _loadPhotoAtIdx(parseInt(thumb.dataset.idx, 10)); }
   });
   document.getElementById("preview-popup").addEventListener("click", e => {
     const thumb = e.target.closest(".gallery-thumb-wrap");
-    if (thumb) { _closeTimelinePopup(); _loadPhotoAtIdx(parseInt(thumb.dataset.idx, 10)); }
+    if (thumb) { _closeTimelinePopup(); _closeDirtreePopup(); _loadPhotoAtIdx(parseInt(thumb.dataset.idx, 10)); }
   });
 
   // Nav buttons — read _galleryCurrentIdx so they don't close over stale currentIdx
@@ -1391,18 +1408,21 @@ function _updatePhotosGallery(currentIdx, detail) {
   document.getElementById("gallery-prev").disabled = currentIdx === 0;
   document.getElementById("gallery-next").disabled = currentIdx === n - 1;
 
-  // 4. Preview strip — show/hide toggle, rebuild only if day/page changed
-  const useDayView = _params.photoSort === "date_asc" && _dayIndex
+  // 4. Preview strip — show/hide toggle, rebuild only if day/dir/page changed
+  const useDayView   = _params.photoSort === "date_asc" && _dayIndex
     && _photosList[currentIdx]?.exif_date;
+  const useDirView   = _params.photoSort === "path_asc" && _dirTree
+    && _photosList[currentIdx]?.path;
+  const useGroupView = useDayView || useDirView;
   const toggleBtn = document.getElementById("preview-toggle");
-  toggleBtn.style.display = useDayView ? "" : "none";
-  if (!useDayView) {
+  toggleBtn.style.display = useGroupView ? "" : "none";
+  if (!useGroupView) {
     const popup = document.getElementById("preview-popup");
     if (popup) popup.style.display = "none";
   }
 
-  const renderIndices = _computeRenderIndices(currentIdx, useDayView);
-  const newStripKey = _computeStripKey(currentIdx, useDayView);
+  const renderIndices = _computeRenderIndices(currentIdx, useDayView, useDirView);
+  const newStripKey = _computeStripKey(currentIdx, useDayView, useDirView);
   if (newStripKey !== _galleryStripKey) {
     _rebuildThumbStrip(renderIndices, currentIdx);
     _galleryStripKey = newStripKey;
