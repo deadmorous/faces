@@ -24,7 +24,9 @@ let _currentViewArgs = {};     // per-view re-render args
 let _algorithms      = null;   // cached from /api/classify/algorithms
 let _peopleCache     = null;   // resolved once from /api/people
 let _dayIndex        = null;   // built from _photosList when sort=date_asc
+let _dirTree         = null;   // built from _photosList when sort=path_asc
 let _timelinePopup   = null;   // currently open timeline popup element
+let _dirPopup        = null;   // currently open dirtree popup element
 
 // Gallery state
 let _photosList = [];
@@ -39,6 +41,8 @@ let _galleryStripKey   = null;       // day-key or page-number; detects strip ch
 let _bboxLoadListener  = null;
 
 function _galleryCleanupListeners() {
+  _closeTimelinePopup();
+  _closeDirtreePopup();
   if (_galleryKeyHandler)    { document.removeEventListener("keydown", _galleryKeyHandler); _galleryKeyHandler = null; }
   if (_galleryResizeHandler) { window.removeEventListener("resize", _galleryResizeHandler); _galleryResizeHandler = null; }
   clearTimeout(_galleryResizeTimer);
@@ -258,6 +262,179 @@ function _openTimelinePopup(paneEl) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Directory-tree navigation helpers
+// ---------------------------------------------------------------------------
+function _buildDirTree(photos) {
+  const root = {};
+  photos.forEach(p => {
+    if (!p.path) return;
+    const parts = p.path.split("/");
+    parts.pop(); // remove filename
+    let node = root;
+    for (const part of parts) {
+      if (!node[part]) node[part] = {};
+      node = node[part];
+    }
+  });
+  return root;
+}
+
+function _updateDirtreePane(path) {
+  const el = document.getElementById("dt-path");
+  if (!el) return;
+  if (!path) { el.textContent = "—"; return; }
+  const parts = path.split("/");
+  parts.pop(); // remove filename (or trailing empty string)
+  el.textContent = parts.length ? parts.join(" / ") : "—";
+}
+
+function _closeDirtreePopup() {
+  if (_dirPopup) {
+    _dirPopup._dtCleanup?.();
+    _dirPopup.remove();
+    _dirPopup = null;
+  }
+}
+
+function _openDirtreePopup(paneEl) {
+  _closeDirtreePopup();
+  if (!_dirTree || !Object.keys(_dirTree).length) return;
+
+  const currentPath = _photosList[_currentViewArgs.currentIdx]?.path || "";
+  const parts = currentPath.split("/");
+  parts.pop(); // remove filename
+
+  const popup = document.createElement("div");
+  popup.className = "tl-popup";
+  document.body.appendChild(popup);
+  _dirPopup = popup;
+
+  const rect = paneEl.getBoundingClientRect();
+  const paneCenter = rect.top + rect.height / 2;
+  popup.style.top  = "0px";
+  popup.style.left = (rect.right + 6) + "px";
+
+  // selectedPath[i] = selected dir component at depth i
+  let selectedPath = [...parts];
+  const bands = []; // bands[depth] = <ul> element
+
+  function getChildren(parentComponents) {
+    let node = _dirTree;
+    for (const c of parentComponents) {
+      if (!node || !node[c]) return [];
+      node = node[c];
+    }
+    return node ? Object.keys(node).sort() : [];
+  }
+
+  function alignBand(band, targetY) {
+    requestAnimationFrame(() => {
+      const active = band.querySelector(".tl-active");
+      if (!active) return;
+      band.style.transform = `translateY(${targetY - (active.offsetTop + active.offsetHeight / 2)}px)`;
+    });
+  }
+
+  function activateInBand(band, val) {
+    band.querySelectorAll("li").forEach(li => li.classList.toggle("tl-active", li.dataset.val === val));
+  }
+
+  function trimBands(depth) {
+    while (bands.length > depth) bands.pop().remove();
+  }
+
+  let _loadTimer = null;
+  function scheduleLoad() {
+    _updateDirtreePane(selectedPath.join("/") + "/");
+    clearTimeout(_loadTimer);
+    _loadTimer = setTimeout(() => {
+      const prefix = selectedPath.join("/");
+      const idx = _photosList.findIndex(p => p.path === prefix || p.path.startsWith(prefix + "/"));
+      if (idx >= 0) _loadPhotoAtIdx(idx);
+    }, 160);
+  }
+
+  function addBandAt(depth, targetY) {
+    const items = getChildren(selectedPath.slice(0, depth));
+    if (!items.length) return;
+
+    const cur = selectedPath[depth];
+    const selVal = cur && items.includes(cur) ? cur : items[0];
+    selectedPath[depth] = selVal;
+    selectedPath.length = depth + 1;
+
+    const band = document.createElement("ul");
+    band.className = "tl-band";
+    popup.appendChild(band);
+    bands.push(band); // bands.length - 1 === depth at this point
+
+    items.forEach(item => {
+      const li = document.createElement("li");
+      li.textContent = item;
+      li.dataset.val = item;
+      if (item === selVal) li.classList.add("tl-active");
+      li.addEventListener("mouseenter", () => {
+        activateInBand(band, item);
+        selectedPath[depth] = item;
+        selectedPath.length = depth + 1;
+        const r = li.getBoundingClientRect();
+        const itemY = r.top + r.height / 2;
+        trimBands(depth + 1);
+        addBandAt(depth + 1, itemY);
+        scheduleLoad();
+      });
+      band.appendChild(li);
+    });
+    alignBand(band, targetY);
+
+    band.addEventListener("wheel", e => {
+      e.preventDefault();
+      const curItems = getChildren(selectedPath.slice(0, depth));
+      const idx = curItems.indexOf(selectedPath[depth] || curItems[0]);
+      const newIdx = Math.max(0, Math.min(curItems.length - 1, idx + (e.deltaY > 0 ? 1 : -1)));
+      if (newIdx === idx) return;
+      const newVal = curItems[newIdx];
+      selectedPath[depth] = newVal;
+      selectedPath.length = depth + 1;
+      activateInBand(band, newVal);
+      alignBand(band, paneCenter);
+      trimBands(depth + 1);
+      addBandAt(depth + 1, paneCenter);
+      scheduleLoad();
+    }, { passive: false });
+
+    addBandAt(depth + 1, targetY);
+  }
+
+  addBandAt(0, paneCenter);
+
+  popup.addEventListener("click", e => {
+    if (e.target.tagName !== "LI") return;
+    clearTimeout(_loadTimer);
+    const prefix = selectedPath.join("/");
+    const idx = _photosList.findIndex(p => p.path === prefix || p.path.startsWith(prefix + "/"));
+    if (idx >= 0) _loadPhotoAtIdx(idx);
+    _closeDirtreePopup();
+  });
+
+  function closeOnClick(e) {
+    if (!popup.contains(e.target) && e.target !== paneEl && !paneEl.contains(e.target))
+      _closeDirtreePopup();
+  }
+  function closeOnKey(e) { if (e.key === "Escape") _closeDirtreePopup(); }
+  setTimeout(() => {
+    document.addEventListener("mousedown", closeOnClick);
+    document.addEventListener("keydown", closeOnKey);
+  }, 0);
+
+  popup._dtCleanup = () => {
+    clearTimeout(_loadTimer);
+    document.removeEventListener("mousedown", closeOnClick);
+    document.removeEventListener("keydown", closeOnKey);
+  };
+}
+
 function _findFallbackIdx(photos) {
   const sort = _params.photoSort;
   const date = _currentViewArgs.currentExifDate;
@@ -438,6 +615,7 @@ function setSidebarView(view) {
   const showLabels     = view === "photos";
   const showSort       = view === "photos";
   const showTimeline   = view === "photos" && _params.photoSort === "date_asc";
+  const showDirtree    = view === "photos" && _params.photoSort === "path_asc";
   document.getElementById("sb-group-threshold").classList.toggle("hidden", !showThresh);
   document.getElementById("sb-group-relsize")  .classList.toggle("hidden", !showRelSize);
   document.getElementById("sb-group-algo")     .classList.toggle("hidden", !showAlgo);
@@ -447,6 +625,7 @@ function setSidebarView(view) {
   document.getElementById("sb-group-sort")     .classList.toggle("hidden", !showSort);
   document.getElementById("sb-group-refrange") .classList.toggle("hidden", !showRefRange);
   document.getElementById("sb-group-timeline") .classList.toggle("hidden", !showTimeline);
+  document.getElementById("sb-group-dirtree")  .classList.toggle("hidden", !showDirtree);
 }
 
 function rerenderCurrentView() {
@@ -631,12 +810,19 @@ function initSidebar() {
     localStorage.setItem("sb_photoSort", _params.photoSort);
     document.getElementById("sb-group-timeline")
       .classList.toggle("hidden", _params.photoSort !== "date_asc");
+    document.getElementById("sb-group-dirtree")
+      .classList.toggle("hidden", _params.photoSort !== "path_asc");
     rerenderCurrentView();
   });
 
   document.getElementById("sb-timeline-pane").addEventListener("click", () => {
     if (_timelinePopup) { _closeTimelinePopup(); return; }
     _openTimelinePopup(document.getElementById("sb-timeline-pane"));
+  });
+
+  document.getElementById("sb-dirtree-pane").addEventListener("click", () => {
+    if (_dirPopup) { _closeDirtreePopup(); return; }
+    _openDirtreePopup(document.getElementById("sb-dirtree-pane"));
   });
 
   // Fetch DB date coverage hint
@@ -995,6 +1181,7 @@ async function renderPhotos(currentMd5 = null) {
 
   _photosList = data.photos;
   _dayIndex   = _buildDayIndex(_photosList);
+  _dirTree    = _buildDirTree(_photosList);
 
   if (_photosList.length === 0) {
     document.getElementById("app").innerHTML = `<h2>Photos</h2><p>No photos match the current filter.</p>`;
@@ -1278,8 +1465,9 @@ function _updatePhotosGallery(currentIdx, detail) {
     wrapEl.querySelectorAll(".bbox-overlay").forEach(el => el.remove());
   }
 
-  // 8. Timeline pane
+  // 8. Timeline / path pane
   _updateTimelinePane(_photosList[currentIdx]?.exif_date);
+  _updateDirtreePane(_photosList[currentIdx]?.path);
 }
 
 // ---------------------------------------------------------------------------
