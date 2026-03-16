@@ -209,6 +209,26 @@ function _openTimelinePopup(paneEl) {
   fillBand(monthBand, getMonths(tlY),    tlM, onHoverMonth);
   fillBand(dayBand,   getDays(tlY, tlM), tlD, onHoverDay);
 
+  // Mouse-wheel scrolling: one item per notch on whichever band the cursor is over
+  function addWheelToBand(band, getItems, getActive, onHover) {
+    band.addEventListener("wheel", e => {
+      e.preventDefault();
+      const items = getItems();
+      const idx = items.indexOf(getActive());
+      const newIdx = Math.max(0, Math.min(items.length - 1, idx + (e.deltaY > 0 ? 1 : -1)));
+      if (newIdx === idx) return;
+      const newVal = items[newIdx];
+      band.querySelectorAll("li").forEach(l => l.classList.remove("tl-active"));
+      band.querySelector(`li[data-val="${newVal}"]`)?.classList.add("tl-active");
+      alignBand(band, paneCenter);
+      onHover(newVal, paneCenter);
+    }, { passive: false });
+  }
+
+  addWheelToBand(yearBand,  () => _dayIndex.years,      () => tlY, onHoverYear);
+  addWheelToBand(monthBand, () => getMonths(tlY),        () => tlM, onHoverMonth);
+  addWheelToBand(dayBand,   () => getDays(tlY, tlM),     () => tlD, onHoverDay);
+
   // Clicking any band item: load immediately and close
   popup.addEventListener("click", e => {
     if (e.target.tagName !== "LI") return;
