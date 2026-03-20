@@ -62,21 +62,35 @@ def _resolve_photo_path(db: Database, cfg: Config, md5: str) -> Path:
     return photo_path
 
 
+_IMMUTABLE = {"Cache-Control": "public, max-age=31536000, immutable"}
+
+
 @router.get("/photo/{md5}", summary="Stream original JPEG photo")
 def get_photo(
     md5: str,
-    db: Annotated[Database, Depends(get_db)],
-    cfg: Annotated[Config, Depends(get_cfg)],
+    max_size: Optional[int] = Query(None, description="Resize so longest edge ≤ this many pixels"),
+    db: Annotated[Database, Depends(get_db)] = ...,
+    cfg: Annotated[Config, Depends(get_cfg)] = ...,
 ):
-    """Return the original JPEG file for the photo identified by *md5*."""
+    """Return the JPEG for *md5*, optionally downscaled to *max_size* pixels on the longest edge."""
     photo_path = _resolve_photo_path(db, cfg, md5)
 
-    def _iter():
-        with open(photo_path, "rb") as f:
-            while chunk := f.read(65536):
-                yield chunk
+    if max_size is None:
+        def _iter():
+            with open(photo_path, "rb") as f:
+                while chunk := f.read(65536):
+                    yield chunk
+        return StreamingResponse(_iter(), media_type="image/jpeg", headers=_IMMUTABLE)
 
-    return StreamingResponse(_iter(), media_type="image/jpeg")
+    try:
+        img = ImageOps.exif_transpose(Image.open(photo_path).convert("RGB"))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not open image: {e}")
+    img.thumbnail((max_size, max_size), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=85)
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="image/jpeg", headers=_IMMUTABLE)
 
 
 @router.get("/face", summary="Return a cropped face thumbnail as JPEG")
@@ -122,4 +136,4 @@ def get_face(
     buf = io.BytesIO()
     cropped.save(buf, format="JPEG", quality=85)
     buf.seek(0)
-    return StreamingResponse(buf, media_type="image/jpeg")
+    return StreamingResponse(buf, media_type="image/jpeg", headers=_IMMUTABLE)

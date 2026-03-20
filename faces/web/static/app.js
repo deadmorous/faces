@@ -1278,7 +1278,7 @@ function _rebuildThumbStrip(renderIndices, currentIdx) {
   for (const i of renderIndices) {
     const p = _photosList[i];
     thumbHtml += `<span class="gallery-thumb-wrap${i === currentIdx ? " active" : ""}" data-idx="${i}">
-      <img src="${p.photo_url}" class="gallery-thumb"
+      <img src="${p.photo_url}?max_size=240" class="gallery-thumb"
         loading="lazy" title="${escHtml(p.path)}" width="80" height="60">
     </span>`;
   }
@@ -1396,8 +1396,11 @@ function _updatePhotosGallery(currentIdx, detail) {
   const labelsStr = uniqueLabels.join(", ");
 
   // 1. Main photo image
-  const imgEl = document.getElementById("main-photo");
-  imgEl.src = detail.photo_url;
+  const imgEl  = document.getElementById("main-photo");
+  const wrapEl = document.getElementById("photo-wrap");
+  const dpr = window.devicePixelRatio || 1;
+  const mainMaxSize = Math.round(Math.max(wrapEl.clientWidth || 1200, wrapEl.clientHeight || 800) * dpr);
+  imgEl.src = `${detail.photo_url}?max_size=${mainMaxSize}`;
   imgEl.alt = escHtml(detail.path);
 
   // 2. Info overlay
@@ -1448,7 +1451,7 @@ function _updatePhotosGallery(currentIdx, detail) {
   facesBand.innerHTML = facesHtml;
 
   // 7. Bbox overlays — recreate closure over new detail; manage load listener
-  const wrapEl = document.getElementById("photo-wrap");
+  // (wrapEl already declared at step 1)
   _injectBboxOverlays = function injectBboxOverlays() {
     wrapEl.querySelectorAll(".bbox-overlay").forEach(el => el.remove());
     const nw = imgEl.naturalWidth, nh = imgEl.naturalHeight;
