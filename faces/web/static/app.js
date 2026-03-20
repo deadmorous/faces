@@ -1645,10 +1645,12 @@ function _updatePhotosGallery(currentIdx, detail) {
     detail.faces.forEach((face, faceIdx) => {
       const [x1, y1, x2, y2] = transformBboxForDisplay(face.bbox, detail.exif_orientation, origDisplayW, origDisplayH);
       const div = document.createElement("a");
-      div.className = "bbox-overlay";
+      const specialClass = face.sticky_name === "__nonface__" ? " bbox-nonface"
+                         : face.sticky_name === "__foreign__" ? " bbox-foreign" : "";
+      div.className = "bbox-overlay" + specialClass;
       div.dataset.faceIdx = faceIdx;
       div.href = `#/similar/${face.md5}/${bboxToPathParam(face.bbox)}`;
-      div.title = "Find similar faces";
+      div.title = (face.sticky_name ? face.sticky_name + " — " : "") + "find similar";
       div.style.left   = (ox + x1 * totalScale) + "px";
       div.style.top    = (oy + y1 * totalScale) + "px";
       div.style.width  = ((x2 - x1) * totalScale) + "px";

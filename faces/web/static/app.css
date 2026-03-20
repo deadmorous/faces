@@ -188,6 +188,8 @@
 }
 
 .photo-overlay-wrap.faces-visible .bbox-overlay { border-color: #ff3; }
+.photo-overlay-wrap .bbox-overlay.bbox-nonface { border-color: #878787; }
+.photo-overlay-wrap .bbox-overlay.bbox-foreign { border-color: #a3d9c2; }
 .bbox-overlay.selected { border-color: orange !important; }
 .bbox-overlay:hover { border-color: rgba(255, 255, 0, 0.7); }
 .bbox-label { display: none; }
