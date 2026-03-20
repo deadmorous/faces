@@ -181,10 +181,16 @@
 
 .bbox-overlay {
   position: absolute;
-  border: 2px solid #ff3;
-  pointer-events: none;
+  border: 2px solid transparent;
+  pointer-events: auto;
   box-sizing: border-box;
+  cursor: pointer;
 }
+
+.photo-overlay-wrap.faces-visible .bbox-overlay { border-color: #ff3; }
+.bbox-overlay:hover { border-color: rgba(255, 255, 0, 0.7); }
+.bbox-label { display: none; }
+.photo-overlay-wrap.faces-visible .bbox-label { display: block; }
 
 .bbox-label {
   position: absolute;
@@ -669,13 +675,3 @@ body.photos-active #app { display: flex; flex-direction: column; overflow: hidde
 }
 .preview-popup .gallery-thumbs { flex-wrap: wrap; overflow-x: visible; }
 
-/* Faces band */
-.photos-faces-band {
-  flex-shrink: 0; height: 84px; overflow-x: auto; overflow-y: hidden;
-  display: flex; align-items: center; gap: 6px;
-  padding: 4px 6px;
-  border-top: 1px solid var(--pico-muted-border-color);
-  background: var(--pico-card-background-color);
-}
-.photos-faces-band .face-cell { flex-shrink: 0; }
-.photos-faces-band .face-cell img { width: 66px; height: 66px; display: block; }

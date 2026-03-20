@@ -785,13 +785,7 @@ function initSidebar() {
   sbShowFaces.addEventListener("change", e => {
     _params.showFaces = e.target.checked;
     localStorage.setItem("sb_showFaces", _params.showFaces);
-    // Toggle overlays without re-fetching
-    if (_params.showFaces) {
-      if (_injectBboxOverlays) _injectBboxOverlays();
-    } else {
-      document.getElementById("photo-wrap")
-        ?.querySelectorAll(".bbox-overlay").forEach(el => el.remove());
-    }
+    document.getElementById("photo-wrap")?.classList.toggle("faces-visible", _params.showFaces);
   });
 
   // Labels and sort for photos view
@@ -1316,7 +1310,6 @@ function _initPhotosGallery(currentIdx, detail) {
         <div class="gallery-thumbs expanded"></div>
       </div>
     </div>
-    <div class="photos-faces-band" id="faces-band"></div>
   </div>`;
 
   document.getElementById("app").innerHTML = html;
@@ -1369,7 +1362,6 @@ function _initPhotosGallery(currentIdx, detail) {
   // Resize handler
   _galleryResizeHandler = () => {
     _updatePopupMaxHeight();
-    if (!_params.showFaces) return;
     clearTimeout(_galleryResizeTimer);
     _galleryResizeTimer = setTimeout(() => { if (_injectBboxOverlays) _injectBboxOverlays(); }, 100);
   };
@@ -1439,19 +1431,10 @@ function _updatePhotosGallery(currentIdx, detail) {
   document.querySelector("#gallery-thumbs .gallery-thumb-wrap.active")
     ?.scrollIntoView({ block: "nearest", inline: "nearest" });
 
-  // 6. Faces band
-  const facesBand = document.getElementById("faces-band");
-  let facesHtml = "";
-  detail.faces.forEach(f => {
-    facesHtml += `<div class="face-cell">
-      <img src="${f.img_url}" loading="lazy" title="${escHtml(f.sticky_name || "")}">
-      <a href="#/similar/${f.md5}/${bboxToPathParam(f.bbox)}" class="similar-link-btn" title="Find similar faces">≈</a>
-    </div>`;
-  });
-  facesBand.innerHTML = facesHtml;
-
-  // 7. Bbox overlays — recreate closure over new detail; manage load listener
+  // 6. Bbox overlays — always inject (border visibility controlled by CSS class);
+  //    includes similar button shown on hover
   // (wrapEl already declared at step 1)
+  wrapEl.classList.toggle("faces-visible", _params.showFaces);
   _injectBboxOverlays = function injectBboxOverlays() {
     wrapEl.querySelectorAll(".bbox-overlay").forEach(el => el.remove());
     const nw = imgEl.naturalWidth, nh = imgEl.naturalHeight;
@@ -1471,8 +1454,10 @@ function _updatePhotosGallery(currentIdx, detail) {
     const totalScale = displayScale * (nw / origDisplayW);
     detail.faces.forEach(face => {
       const [x1, y1, x2, y2] = transformBboxForDisplay(face.bbox, detail.exif_orientation, origDisplayW, origDisplayH);
-      const div = document.createElement("div");
+      const div = document.createElement("a");
       div.className = "bbox-overlay";
+      div.href = `#/similar/${face.md5}/${bboxToPathParam(face.bbox)}`;
+      div.title = "Find similar faces";
       div.style.left   = (ox + x1 * totalScale) + "px";
       div.style.top    = (oy + y1 * totalScale) + "px";
       div.style.width  = ((x2 - x1) * totalScale) + "px";
@@ -1488,14 +1473,9 @@ function _updatePhotosGallery(currentIdx, detail) {
   };
 
   if (_bboxLoadListener) imgEl.removeEventListener("load", _bboxLoadListener);
-  if (_params.showFaces) {
-    _bboxLoadListener = _injectBboxOverlays;
-    imgEl.addEventListener("load", _bboxLoadListener);
-    if (imgEl.complete && imgEl.naturalWidth) _injectBboxOverlays();
-  } else {
-    _bboxLoadListener = null;
-    wrapEl.querySelectorAll(".bbox-overlay").forEach(el => el.remove());
-  }
+  _bboxLoadListener = _injectBboxOverlays;
+  imgEl.addEventListener("load", _bboxLoadListener);
+  if (imgEl.complete && imgEl.naturalWidth) _injectBboxOverlays();
 
   // 8. Timeline / path pane
   _updateTimelinePane(_photosList[currentIdx]?.exif_date);
