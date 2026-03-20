@@ -1457,17 +1457,26 @@ function _updatePhotosGallery(currentIdx, detail) {
     const nw = imgEl.naturalWidth, nh = imgEl.naturalHeight;
     if (!nw || !nh) return;
     // object-fit:contain — compute actual rendered image rect within wrap
-    const scale = Math.min(imgEl.clientWidth / nw, imgEl.clientHeight / nh);
-    const ox = (imgEl.clientWidth  - nw * scale) / 2;
-    const oy = (imgEl.clientHeight - nh * scale) / 2;
+    const displayScale = Math.min(imgEl.clientWidth / nw, imgEl.clientHeight / nh);
+    const ox = (imgEl.clientWidth  - nw * displayScale) / 2;
+    const oy = (imgEl.clientHeight - nh * displayScale) / 2;
+    // Bboxes are in original (unresized) pixel coords; the server may have downscaled.
+    // transformBboxForDisplay expects display-space dims (post-EXIF), which for
+    // transposed orientations (5-8) are rawH×rawW, not rawW×rawH.
+    const rawW = detail.raw_width  || nw;
+    const rawH = detail.raw_height || nh;
+    const isTransposed = [5, 6, 7, 8].includes(detail.exif_orientation);
+    const origDisplayW = isTransposed ? rawH : rawW;
+    const origDisplayH = isTransposed ? rawW : rawH;
+    const totalScale = displayScale * (nw / origDisplayW);
     detail.faces.forEach(face => {
-      const [x1, y1, x2, y2] = transformBboxForDisplay(face.bbox, detail.exif_orientation, nw, nh);
+      const [x1, y1, x2, y2] = transformBboxForDisplay(face.bbox, detail.exif_orientation, origDisplayW, origDisplayH);
       const div = document.createElement("div");
       div.className = "bbox-overlay";
-      div.style.left   = (ox + x1 * scale) + "px";
-      div.style.top    = (oy + y1 * scale) + "px";
-      div.style.width  = ((x2 - x1) * scale) + "px";
-      div.style.height = ((y2 - y1) * scale) + "px";
+      div.style.left   = (ox + x1 * totalScale) + "px";
+      div.style.top    = (oy + y1 * totalScale) + "px";
+      div.style.width  = ((x2 - x1) * totalScale) + "px";
+      div.style.height = ((y2 - y1) * totalScale) + "px";
       if (face.sticky_name && !["__nonface__", "__foreign__"].includes(face.sticky_name)) {
         const lbl = document.createElement("div");
         lbl.className = "bbox-label";

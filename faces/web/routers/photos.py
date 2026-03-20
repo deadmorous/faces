@@ -15,11 +15,15 @@ from ...db import Database, load_photo_dates, parse_date, photo_date_coverage
 router = APIRouter(prefix="/api/photos", tags=["photos"])
 
 
-def _read_exif_orientation(path: Path) -> int:
+def _read_image_meta(path: Path) -> tuple[int, int, int]:
+    """Return (exif_orientation, raw_width, raw_height) for the image at *path*."""
     try:
-        return Image.open(path).getexif().get(0x0112, 1)
+        img = Image.open(path)
+        orientation = img.getexif().get(0x0112, 1)
+        w, h = img.size
+        return orientation, w, h
     except Exception:
-        return 1
+        return 1, 0, 0
 
 
 VALID_SORTS = {"date_asc", "path_asc"}
@@ -141,13 +145,15 @@ def get_photo(
 
     rel = photo_row["path"]
     photo_path = (cfg.photos_dir / rel) if cfg.photos_dir else Path(rel)
-    exif_orientation = _read_exif_orientation(photo_path)
+    exif_orientation, raw_width, raw_height = _read_image_meta(photo_path)
 
     return PhotoDetail(
         md5=md5,
         path=photo_row["path"],
         exif_date=photo_row.get("exif_date"),
         exif_orientation=exif_orientation,
+        raw_width=raw_width,
+        raw_height=raw_height,
         photo_url=f"/img/photo/{md5}",
         faces=faces,
     )
