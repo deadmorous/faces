@@ -40,17 +40,35 @@ let _galleryCurrentIdx = -1;         // -1 = gallery not yet initialised
 let _galleryStripKey   = null;       // day-key or page-number; detects strip changes
 let _bboxLoadListener  = null;
 
+// Photo view face selection state
+let _selectedFaceIndices     = new Set();
+let _currentPhotoDetail      = null;
+let _photoCtxMenu            = null;
+let _boxSelectStart          = null;
+let _boxSelectEl             = null;
+let _galleryMouseMoveHandler = null;
+let _galleryMouseUpHandler   = null;
+let _galleryCtxDismissHandler = null;
+
 function _galleryCleanupListeners() {
   _closeTimelinePopup();
   _closeDirtreePopup();
-  if (_galleryKeyHandler)    { document.removeEventListener("keydown", _galleryKeyHandler); _galleryKeyHandler = null; }
-  if (_galleryResizeHandler) { window.removeEventListener("resize", _galleryResizeHandler); _galleryResizeHandler = null; }
+  _dismissPhotoCtxMenu();
+  if (_galleryKeyHandler)       { document.removeEventListener("keydown",   _galleryKeyHandler);       _galleryKeyHandler       = null; }
+  if (_galleryResizeHandler)    { window.removeEventListener("resize",      _galleryResizeHandler);    _galleryResizeHandler    = null; }
+  if (_galleryMouseMoveHandler) { document.removeEventListener("mousemove", _galleryMouseMoveHandler); _galleryMouseMoveHandler = null; }
+  if (_galleryMouseUpHandler)   { document.removeEventListener("mouseup",   _galleryMouseUpHandler);   _galleryMouseUpHandler   = null; }
+  if (_galleryCtxDismissHandler){ document.removeEventListener("click",     _galleryCtxDismissHandler, true); _galleryCtxDismissHandler = null; }
   clearTimeout(_galleryResizeTimer);
-  _injectBboxOverlays = null;
-  _photoDetailCache   = new Map();
-  _galleryCurrentIdx  = -1;
-  _galleryStripKey    = null;
-  _bboxLoadListener   = null;
+  if (_boxSelectEl) { _boxSelectEl.remove(); _boxSelectEl = null; }
+  _boxSelectStart      = null;
+  _injectBboxOverlays  = null;
+  _photoDetailCache    = new Map();
+  _galleryCurrentIdx   = -1;
+  _galleryStripKey     = null;
+  _bboxLoadListener    = null;
+  _selectedFaceIndices = new Set();
+  _currentPhotoDetail  = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1281,6 +1299,79 @@ function _rebuildThumbStrip(renderIndices, currentIdx) {
   if (popupStrip) popupStrip.innerHTML = thumbHtml;
 }
 
+// ---------------------------------------------------------------------------
+// Photo view: face selection helpers
+// ---------------------------------------------------------------------------
+function _dismissPhotoCtxMenu() {
+  if (_photoCtxMenu) { _photoCtxMenu.remove(); _photoCtxMenu = null; }
+}
+
+function _updateOverlaySelectionClasses(wrapEl) {
+  wrapEl.querySelectorAll(".bbox-overlay").forEach(el => {
+    el.classList.toggle("selected", _selectedFaceIndices.has(parseInt(el.dataset.faceIdx, 10)));
+  });
+}
+
+function _showPhotoCtxMenu(x, y) {
+  _dismissPhotoCtxMenu();
+  const detail = _currentPhotoDetail;
+  if (!detail || _selectedFaceIndices.size === 0) return;
+
+  const single    = _selectedFaceIndices.size === 1;
+  const firstIdx  = Math.min(..._selectedFaceIndices);
+  const firstFace = detail.faces[firstIdx];
+
+  const menu = document.createElement("ul");
+  menu.className = "photo-ctx-menu";
+  menu.style.left = x + "px";
+  menu.style.top  = y + "px";
+
+  function addItem(label, onClick) {
+    const li = document.createElement("li");
+    li.textContent = label;
+    li.addEventListener("click", onClick);
+    menu.appendChild(li);
+  }
+
+  if (single) {
+    addItem("Find similar faces", () => {
+      _dismissPhotoCtxMenu();
+      location.hash = `#/similar/${firstFace.md5}/${bboxToPathParam(firstFace.bbox)}`;
+    });
+    const label = firstFace.sticky_name;
+    if (label && !SPECIAL_LABELS.includes(label)) {
+      addItem("Go to person", () => {
+        _dismissPhotoCtxMenu();
+        window.open(`#/people/${encodeURIComponent(label)}/faces`, "_blank");
+      });
+    }
+  }
+
+  async function _labelSelected(name) {
+    _dismissPhotoCtxMenu();
+    const faces = [..._selectedFaceIndices].map(i => detail.faces[i]);
+    for (const face of faces) {
+      try {
+        await apiPatch(`/api/faces/${face.md5}/${face.bbox.join("_")}`, { name });
+      } catch (e) { showError(e.message); return; }
+    }
+    _selectedFaceIndices.clear();
+    _photoDetailCache.delete(detail.md5);
+    _loadPhotoAtIdx(_galleryCurrentIdx);
+  }
+
+  addItem("Not a face",  () => _labelSelected("__nonface__"));
+  addItem("Foreign",     () => _labelSelected("__foreign__"));
+
+  document.body.appendChild(menu);
+  _photoCtxMenu = menu;
+
+  // Adjust if off-screen
+  const mr = menu.getBoundingClientRect();
+  if (mr.right  > window.innerWidth)  menu.style.left = (x - mr.width)  + "px";
+  if (mr.bottom > window.innerHeight) menu.style.top  = (y - mr.height) + "px";
+}
+
 function _initPhotosGallery(currentIdx, detail) {
   const n = _photosList.length;
   const useDayView  = _params.photoSort === "date_asc" && _dayIndex
@@ -1367,6 +1458,103 @@ function _initPhotosGallery(currentIdx, detail) {
   };
   window.addEventListener("resize", _galleryResizeHandler);
 
+  // Box select — mousedown starts if not on a face overlay
+  const wrapElInit = document.getElementById("photo-wrap");
+
+  // Left-click on photo background (no drag) → deselect all
+  let _boxSelectJustFinished = false;
+  wrapElInit.addEventListener("click", e => {
+    if (e.target.closest(".bbox-overlay")) return;
+    if (_boxSelectJustFinished) { _boxSelectJustFinished = false; return; }
+    if (_selectedFaceIndices.size > 0) {
+      _selectedFaceIndices = new Set();
+      _updateOverlaySelectionClasses(wrapElInit);
+    }
+  });
+
+  wrapElInit.addEventListener("mousedown", e => {
+    if (e.button !== 0 || e.target.closest(".bbox-overlay")) return;
+    _dismissPhotoCtxMenu();
+    const r = wrapElInit.getBoundingClientRect();
+    _boxSelectStart = { x: e.clientX - r.left, y: e.clientY - r.top, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey };
+    e.preventDefault();
+  });
+
+  _galleryMouseMoveHandler = e => {
+    if (!_boxSelectStart) return;
+    const r  = wrapElInit.getBoundingClientRect();
+    const cx = Math.max(0, Math.min(e.clientX - r.left, r.width));
+    const cy = Math.max(0, Math.min(e.clientY - r.top,  r.height));
+    const x1 = Math.min(_boxSelectStart.x, cx), y1 = Math.min(_boxSelectStart.y, cy);
+    const w  = Math.abs(cx - _boxSelectStart.x), h = Math.abs(cy - _boxSelectStart.y);
+    if (!_boxSelectEl && (w > 4 || h > 4)) {
+      _boxSelectEl = document.createElement("div");
+      _boxSelectEl.className = "bbox-select-rect";
+      wrapElInit.appendChild(_boxSelectEl);
+    }
+    if (_boxSelectEl) {
+      _boxSelectEl.style.left   = x1 + "px";
+      _boxSelectEl.style.top    = y1 + "px";
+      _boxSelectEl.style.width  = w  + "px";
+      _boxSelectEl.style.height = h  + "px";
+    }
+  };
+  document.addEventListener("mousemove", _galleryMouseMoveHandler);
+
+  _galleryMouseUpHandler = e => {
+    if (!_boxSelectStart || e.button !== 0) return;
+    if (_boxSelectEl) {
+      const r   = wrapElInit.getBoundingClientRect();
+      const cx  = Math.max(0, Math.min(e.clientX - r.left, r.width));
+      const cy  = Math.max(0, Math.min(e.clientY - r.top,  r.height));
+      const sx1 = Math.min(_boxSelectStart.x, cx), sy1 = Math.min(_boxSelectStart.y, cy);
+      const sx2 = Math.max(_boxSelectStart.x, cx), sy2 = Math.max(_boxSelectStart.y, cy);
+      const { shiftKey, ctrlKey } = _boxSelectStart;
+      wrapElInit.querySelectorAll(".bbox-overlay").forEach(el => {
+        const idx = parseInt(el.dataset.faceIdx, 10);
+        const ex1 = parseFloat(el.style.left), ey1 = parseFloat(el.style.top);
+        const ex2 = ex1 + parseFloat(el.style.width), ey2 = ey1 + parseFloat(el.style.height);
+        if (ex1 < sx2 && ex2 > sx1 && ey1 < sy2 && ey2 > sy1) {
+          if (ctrlKey) {
+            if (_selectedFaceIndices.has(idx)) _selectedFaceIndices.delete(idx);
+            else _selectedFaceIndices.add(idx);
+          } else if (shiftKey) {
+            _selectedFaceIndices.delete(idx);
+          } else {
+            _selectedFaceIndices.add(idx);
+          }
+        }
+      });
+      _updateOverlaySelectionClasses(wrapElInit);
+      _boxSelectJustFinished = true;
+      _boxSelectEl.remove();
+      _boxSelectEl = null;
+    }
+    _boxSelectStart = null;
+  };
+  document.addEventListener("mouseup", _galleryMouseUpHandler);
+
+  // Context menu — right-click on photo (face adds to selection, outside doesn't change it)
+  wrapElInit.addEventListener("contextmenu", e => {
+    e.preventDefault();
+    _dismissPhotoCtxMenu();
+    const faceEl = e.target.closest(".bbox-overlay");
+    if (faceEl) {
+      const idx = parseInt(faceEl.dataset.faceIdx, 10);
+      if (!_selectedFaceIndices.has(idx)) {
+        _selectedFaceIndices.add(idx);
+        _updateOverlaySelectionClasses(wrapElInit);
+      }
+    }
+    if (_selectedFaceIndices.size > 0) _showPhotoCtxMenu(e.clientX, e.clientY);
+  });
+
+  // Dismiss context menu on click outside
+  _galleryCtxDismissHandler = e => {
+    if (_photoCtxMenu && !_photoCtxMenu.contains(e.target)) _dismissPhotoCtxMenu();
+  };
+  document.addEventListener("click", _galleryCtxDismissHandler, true);
+
   _cleanup = () => {
     _galleryCleanupListeners();
     _closeTimelinePopup();
@@ -1378,7 +1566,9 @@ function _initPhotosGallery(currentIdx, detail) {
 }
 
 function _updatePhotosGallery(currentIdx, detail) {
-  _galleryCurrentIdx = currentIdx;
+  _galleryCurrentIdx   = currentIdx;
+  _currentPhotoDetail  = detail;
+  _selectedFaceIndices = new Set();
   const n = _photosList.length;
 
   const uniqueLabels = [...new Set(
@@ -1452,16 +1642,26 @@ function _updatePhotosGallery(currentIdx, detail) {
     const origDisplayW = isTransposed ? rawH : rawW;
     const origDisplayH = isTransposed ? rawW : rawH;
     const totalScale = displayScale * (nw / origDisplayW);
-    detail.faces.forEach(face => {
+    detail.faces.forEach((face, faceIdx) => {
       const [x1, y1, x2, y2] = transformBboxForDisplay(face.bbox, detail.exif_orientation, origDisplayW, origDisplayH);
       const div = document.createElement("a");
       div.className = "bbox-overlay";
+      div.dataset.faceIdx = faceIdx;
       div.href = `#/similar/${face.md5}/${bboxToPathParam(face.bbox)}`;
       div.title = "Find similar faces";
       div.style.left   = (ox + x1 * totalScale) + "px";
       div.style.top    = (oy + y1 * totalScale) + "px";
       div.style.width  = ((x2 - x1) * totalScale) + "px";
       div.style.height = ((y2 - y1) * totalScale) + "px";
+      if (_selectedFaceIndices.has(faceIdx)) div.classList.add("selected");
+      div.addEventListener("click", e => {
+        if (e.shiftKey || e.ctrlKey) {
+          e.preventDefault();
+          if (_selectedFaceIndices.has(faceIdx)) _selectedFaceIndices.delete(faceIdx);
+          else _selectedFaceIndices.add(faceIdx);
+          div.classList.toggle("selected", _selectedFaceIndices.has(faceIdx));
+        }
+      });
       if (face.sticky_name && !["__nonface__", "__foreign__"].includes(face.sticky_name)) {
         const lbl = document.createElement("div");
         lbl.className = "bbox-label";

@@ -188,9 +188,40 @@
 }
 
 .photo-overlay-wrap.faces-visible .bbox-overlay { border-color: #ff3; }
+.bbox-overlay.selected { border-color: orange !important; }
 .bbox-overlay:hover { border-color: rgba(255, 255, 0, 0.7); }
 .bbox-label { display: none; }
 .photo-overlay-wrap.faces-visible .bbox-label { display: block; }
+
+/* Box-select rubber band */
+.bbox-select-rect {
+  position: absolute;
+  border: 1.5px dashed rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+/* Photo view context menu */
+.photo-ctx-menu {
+  position: fixed;
+  list-style: none;
+  margin: 0; padding: 4px 0;
+  background: var(--pico-card-background-color);
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  z-index: 300;
+  min-width: 170px;
+}
+.photo-ctx-menu li {
+  list-style: none;
+  padding: 7px 16px;
+  cursor: pointer;
+  font-size: 0.88rem;
+  white-space: nowrap;
+}
+.photo-ctx-menu li:hover { background: var(--pico-primary-background); }
 
 .bbox-label {
   position: absolute;
