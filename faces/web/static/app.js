@@ -1657,7 +1657,10 @@ function _updatePhotosGallery(currentIdx, detail) {
       div.style.height = ((y2 - y1) * totalScale) + "px";
       if (_selectedFaceIndices.has(faceIdx)) div.classList.add("selected");
       div.addEventListener("click", e => {
-        if (e.shiftKey || e.ctrlKey) {
+        if (e.ctrlKey) {
+          e.preventDefault();
+          window.open(div.href, "_blank");
+        } else if (e.shiftKey) {
           e.preventDefault();
           if (_selectedFaceIndices.has(faceIdx)) _selectedFaceIndices.delete(faceIdx);
           else _selectedFaceIndices.add(faceIdx);
