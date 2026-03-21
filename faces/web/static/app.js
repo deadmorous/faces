@@ -1447,6 +1447,18 @@ function _initPhotosGallery(currentIdx, detail) {
     if (document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) return;
     if (e.key === "ArrowLeft"  && _galleryCurrentIdx > 0)                    _loadPhotoAtIdx(_galleryCurrentIdx - 1);
     if (e.key === "ArrowRight" && _galleryCurrentIdx < _photosList.length - 1) _loadPhotoAtIdx(_galleryCurrentIdx + 1);
+    if (e.key === "a") {
+      const wrapEl = document.getElementById("photo-wrap");
+      if (!wrapEl || !_currentPhotoDetail) return;
+      _currentPhotoDetail.faces.forEach((_, i) => _selectedFaceIndices.add(i));
+      _updateOverlaySelectionClasses(wrapEl);
+    }
+    if (e.key === "d") {
+      const wrapEl = document.getElementById("photo-wrap");
+      if (!wrapEl || _selectedFaceIndices.size === 0) return;
+      _selectedFaceIndices = new Set();
+      _updateOverlaySelectionClasses(wrapEl);
+    }
   };
   document.addEventListener("keydown", _galleryKeyHandler);
 
