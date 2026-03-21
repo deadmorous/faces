@@ -1336,7 +1336,7 @@ function _showPhotoCtxMenu(x, y) {
   if (single) {
     addItem("Find similar faces", () => {
       _dismissPhotoCtxMenu();
-      location.hash = `#/similar/${firstFace.md5}/${bboxToPathParam(firstFace.bbox)}`;
+      window.open(`#/similar/${firstFace.md5}/${bboxToPathParam(firstFace.bbox)}`, "_blank");
     });
     const label = firstFace.sticky_name;
     if (label && !SPECIAL_LABELS.includes(label)) {
