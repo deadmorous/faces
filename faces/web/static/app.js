@@ -1548,7 +1548,6 @@ function _initPhotosGallery(currentIdx, detail) {
 
   // Context menu — right-click on photo (face adds to selection, outside doesn't change it)
   wrapElInit.addEventListener("contextmenu", e => {
-    e.preventDefault();
     _dismissPhotoCtxMenu();
     const faceEl = e.target.closest(".bbox-overlay");
     if (faceEl) {
@@ -1558,7 +1557,10 @@ function _initPhotosGallery(currentIdx, detail) {
         _updateOverlaySelectionClasses(wrapElInit);
       }
     }
-    if (_selectedFaceIndices.size > 0) _showPhotoCtxMenu(e.clientX, e.clientY);
+    if (_selectedFaceIndices.size > 0) {
+      e.preventDefault();
+      _showPhotoCtxMenu(e.clientX, e.clientY);
+    }
   });
 
   // Dismiss context menu on click outside
