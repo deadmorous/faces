@@ -97,6 +97,11 @@ def label_face(
     return Response(status_code=204)
 
 
+_TW_HALF_DAYS: dict[str, float] = {
+    "day": 0.5, "3days": 1.5, "week": 3.5, "month": 15.0,
+}
+
+
 @router.get("/similar", response_model=SimilarFacesResponse,
             summary="Find faces with similar embeddings")
 def get_similar_faces(
@@ -107,6 +112,11 @@ def get_similar_faces(
     unlabeled_only: bool = False,
     since: Optional[str] = None,
     until: Optional[str] = None,
+    time_window: Optional[str] = Query(None,
+        description="Symmetric window around seed photo date: day, 3days, week, month"),
+    rel_size_min: float = Query(0.0, ge=0.0, le=1.0),
+    min_face_px: int = Query(0, ge=0,
+        description="Minimum face size: min(width, height) in pixels"),
     db: Annotated[Database, Depends(get_db)] = ...,
 ):
     """Return up to *limit* faces sorted by embedding distance to the seed face."""
@@ -141,6 +151,27 @@ def get_similar_faces(
         raise HTTPException(status_code=404, detail="Face not found")
     seed_embedding = seed_row["embedding"]
 
+    # Compute time-window filter anchored to seed photo's EXIF date
+    tw_since_ts = tw_until_ts = None
+    if time_window and time_window in _TW_HALF_DAYS:
+        photo_rows = (db.photos.search()
+                      .where(f"md5 = '{md5}'", prefilter=True)
+                      .limit(1).to_list())
+        seed_exif = photo_rows[0].get("exif_date") if photo_rows else None
+        if seed_exif:
+            half = _TW_HALF_DAYS[time_window] * 86400
+            tw_since_ts = seed_exif - half
+            tw_until_ts = seed_exif + half
+
+    # Merge explicit date bounds and time-window bounds (take tighter intersection)
+    def _intersect(a, b, take_max: bool):
+        if a is not None and b is not None:
+            return max(a, b) if take_max else min(a, b)
+        return a if a is not None else b
+
+    eff_since = _intersect(since_ts, tw_since_ts, take_max=True)
+    eff_until = _intersect(until_ts, tw_until_ts, take_max=False)
+
     emb_index = request.app.state.embeddings_cache["index"]
     emb_rows  = request.app.state.embeddings_cache["rows"]
 
@@ -173,11 +204,12 @@ def get_similar_faces(
             rel_size=round(_rel_size(r["md5"], bbox_list), 3),
         )
 
-    # Fetch generously so Python-side filtering (seed + unlabeled_only + date) still
-    # yields up to `limit` results. LanceDB returns _distance = squared L2.
-    needs_date_filter = since_ts is not None or until_ts is not None
+    # Fetch generously so Python-side filtering still yields up to `limit` results.
+    # LanceDB returns _distance = squared L2.
+    needs_date_filter = eff_since is not None or eff_until is not None
+    needs_size_filter = rel_size_min > 0 or min_face_px > 0
     photo_dates_similar = load_photo_dates(db) if needs_date_filter else None
-    fetch_n = limit * 5 + 1 if (unlabeled_only or needs_date_filter) else limit + 1
+    fetch_n = limit * 5 + 1 if (unlabeled_only or needs_date_filter or needs_size_filter) else limit + 1
     candidates = db.faces.search(seed_embedding).limit(fetch_n).to_list()
 
     seed_face = _make(seed_row)
@@ -192,10 +224,20 @@ def get_similar_faces(
         if photo_dates_similar is not None:
             mt = photo_dates_similar.get(r["md5"])
             if mt is not None:
-                if since_ts and mt < since_ts:
+                if eff_since and mt < eff_since:
                     continue
-                if until_ts and mt >= until_ts:
+                if eff_until and mt >= eff_until:
                     continue
+        if rel_size_min > 0:
+            key = (r["md5"], tuple(r["bbox"]))
+            idx = emb_index.get(key)
+            rs = emb_rows[idx].get("rel_size", 1.0) if idx is not None else 1.0
+            if rs < rel_size_min:
+                continue
+        if min_face_px > 0:
+            b = r["bbox"]
+            if min(b[2] - b[0], b[3] - b[1]) < min_face_px:
+                continue
         results.append(_make(r))
         if len(results) >= limit:
             break

@@ -18,6 +18,8 @@ const _params = {
   photoSort:   localStorage.getItem("sb_photoSort")   || "date_asc",
   showFaces:        localStorage.getItem("sb_showFaces") === "true",
   previewExpanded:  localStorage.getItem("sb_previewExpanded") === "true",
+  timeWindow:  localStorage.getItem("sb_timeWindow")  || "",
+  minFacePx:   parseInt(localStorage.getItem("sb_minFacePx") || "0", 10),
 };
 let _currentView     = null;   // "unlabeled" | "classify" | "similar" | ...
 let _currentViewArgs = {};     // per-view re-render args
@@ -634,16 +636,18 @@ function setSidebarView(view) {
   const showSort       = view === "photos";
   const showTimeline   = view === "photos" && _params.photoSort === "date_asc";
   const showDirtree    = view === "photos" && _params.photoSort === "path_asc";
-  document.getElementById("sb-group-threshold").classList.toggle("hidden", !showThresh);
-  document.getElementById("sb-group-relsize")  .classList.toggle("hidden", !showRelSize);
-  document.getElementById("sb-group-algo")     .classList.toggle("hidden", !showAlgo);
-  document.getElementById("sb-group-daterange").classList.toggle("hidden", !showDateRange);
-  document.getElementById("sb-group-faces")    .classList.toggle("hidden", !showFaces);
-  document.getElementById("sb-group-labels")   .classList.toggle("hidden", !showLabels);
-  document.getElementById("sb-group-sort")     .classList.toggle("hidden", !showSort);
-  document.getElementById("sb-group-refrange") .classList.toggle("hidden", !showRefRange);
-  document.getElementById("sb-group-timeline") .classList.toggle("hidden", !showTimeline);
-  document.getElementById("sb-group-dirtree")  .classList.toggle("hidden", !showDirtree);
+  const showTimeWindow = view === "similar";
+  document.getElementById("sb-group-threshold") .classList.toggle("hidden", !showThresh);
+  document.getElementById("sb-group-relsize")   .classList.toggle("hidden", !showRelSize);
+  document.getElementById("sb-group-algo")      .classList.toggle("hidden", !showAlgo);
+  document.getElementById("sb-group-daterange") .classList.toggle("hidden", !showDateRange);
+  document.getElementById("sb-group-faces")     .classList.toggle("hidden", !showFaces);
+  document.getElementById("sb-group-labels")    .classList.toggle("hidden", !showLabels);
+  document.getElementById("sb-group-sort")      .classList.toggle("hidden", !showSort);
+  document.getElementById("sb-group-refrange")  .classList.toggle("hidden", !showRefRange);
+  document.getElementById("sb-group-timeline")  .classList.toggle("hidden", !showTimeline);
+  document.getElementById("sb-group-dirtree")   .classList.toggle("hidden", !showDirtree);
+  document.getElementById("sb-group-timewindow").classList.toggle("hidden", !showTimeWindow);
 }
 
 function rerenderCurrentView() {
@@ -827,6 +831,24 @@ function initSidebar() {
     rerenderCurrentView();
   });
 
+  const sbTimeWindow = document.getElementById("sb-time-window");
+  const sbMinFacePx  = document.getElementById("sb-min-face-px");
+  sbTimeWindow.value = _params.timeWindow;
+  sbMinFacePx.value  = _params.minFacePx || "";
+
+  sbTimeWindow.addEventListener("change", e => {
+    _params.timeWindow = e.target.value;
+    localStorage.setItem("sb_timeWindow", _params.timeWindow);
+    rerenderCurrentView();
+  });
+  let minFacePxTimer;
+  sbMinFacePx.addEventListener("input", e => {
+    _params.minFacePx = parseInt(e.target.value || "0", 10);
+    localStorage.setItem("sb_minFacePx", _params.minFacePx);
+    clearTimeout(minFacePxTimer);
+    minFacePxTimer = setTimeout(rerenderCurrentView, 600);
+  });
+
   document.getElementById("sb-timeline-pane").addEventListener("click", () => {
     if (_timelinePopup) { _closeTimelinePopup(); return; }
     _openTimelinePopup(document.getElementById("sb-timeline-pane"));
@@ -1004,7 +1026,8 @@ async function renderClassify(person = null) {
   // effectiveThreshold is the Euclidean eps; API expects cosine threshold = 1 - eps²/2
   const threshParam = `&threshold=${1 - _params.threshold * _params.threshold / 2}`;
   const dqs = dateQs(), rqs = refDateQs();
-  const baseParams  = appendQs(appendQs(`algo=${encodeURIComponent(_classifyAlgo)}&min_size=3${threshParam}&rel_size_min=${_params.relSizeMin}`, dqs), rqs);
+  const minFacePxParam = _params.minFacePx > 0 ? `&min_face_px=${_params.minFacePx}` : "";
+  const baseParams  = appendQs(appendQs(`algo=${encodeURIComponent(_classifyAlgo)}&min_size=3${threshParam}&rel_size_min=${_params.relSizeMin}${minFacePxParam}`, dqs), rqs);
 
   let peopleList;
   try {
@@ -1933,10 +1956,16 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = true) {
   viewTitleEl.classList.remove("hidden");
   showSpinner();
   const bboxQuery = bboxParam.replace(/_/g, ",");
+  let simUrl = `/api/faces/similar?md5=${md5}&bbox=${bboxQuery}&limit=100&unlabeled_only=${unlabeledOnly}`;
+  if (_params.relSizeMin > 0) simUrl += `&rel_size_min=${_params.relSizeMin}`;
+  if (_params.minFacePx  > 0) simUrl += `&min_face_px=${_params.minFacePx}`;
+  if (_params.timeWindow)      simUrl += `&time_window=${encodeURIComponent(_params.timeWindow)}`;
+  simUrl = appendQs(simUrl, dateQs());
+
   let data, people;
   try {
     [data, people] = await Promise.all([
-      apiFetch(appendQs(`/api/faces/similar?md5=${md5}&bbox=${bboxQuery}&limit=100&unlabeled_only=${unlabeledOnly}`, dateQs())),
+      apiFetch(simUrl),
       apiFetch("/api/people"),
     ]);
   } catch (e) {
@@ -1951,8 +1980,7 @@ async function renderSimilar(md5, bboxParam, unlabeledOnly = true) {
 
   const allFaces = data.faces;
   const effectiveMaxDist = _params.threshold;
-  const relSizeMin = _params.relSizeMin;
-  const visibleFaces = allFaces.filter(f => f.dist <= effectiveMaxDist && f.rel_size >= relSizeMin);
+  const visibleFaces = allFaces.filter(f => f.dist <= effectiveMaxDist);
 
   const selected = new Set();
   const app = document.getElementById("app");
