@@ -64,6 +64,7 @@ def list_unlabeled_faces(
 
 @router.patch("/{md5}/{bbox}", status_code=204, summary="Set sticky label on a single face")
 def label_face(
+    request: Request,
     md5: str,
     bbox: str,
     body: FaceLabelRequest,
@@ -93,6 +94,14 @@ def label_face(
         raise HTTPException(status_code=404, detail="Face not found")
 
     stick_face(db, md5, bbox_list, body.name)
+
+    # Keep embeddings cache consistent (same pattern as classify/labels and people rename)
+    emb_index = request.app.state.embeddings_cache["index"]
+    emb_rows  = request.app.state.embeddings_cache["rows"]
+    key = (md5, tuple(bbox_list))
+    if key in emb_index:
+        emb_rows[emb_index[key]]["name"] = body.name
+    request.app.state.data_generation += 1
 
     return Response(status_code=204)
 
