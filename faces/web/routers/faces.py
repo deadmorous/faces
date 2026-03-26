@@ -17,6 +17,7 @@ def list_unlabeled_faces(
     page: int = 1,
     page_size: int = 100,
     rel_size_min: float = 0.0,
+    min_face_px: int = 0,
     since: Optional[str] = None,
     until: Optional[str] = None,
     db: Annotated[Database, Depends(get_db)] = ...,
@@ -34,6 +35,9 @@ def list_unlabeled_faces(
     unlabeled = [r for r in all_rows if not r.get("name")]
     if rel_size_min > 0.0:
         unlabeled = [r for r in unlabeled if r.get("rel_size", 1.0) >= rel_size_min]
+    if min_face_px > 0:
+        unlabeled = [r for r in unlabeled
+                     if min(r["bbox"][2] - r["bbox"][0], r["bbox"][3] - r["bbox"][1]) >= min_face_px]
     if photo_dates is not None:
         def _in_range(r):
             mt = photo_dates.get(r["md5"])

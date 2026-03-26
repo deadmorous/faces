@@ -949,7 +949,8 @@ async function renderUnlabeled(page = 1) {
   showSpinner();
   let data;
   try {
-    data = await apiFetch(appendQs(`/api/faces/unlabeled?page=${page}&page_size=100&rel_size_min=${_params.relSizeMin}`, dateQs()));
+    const minFacePxParam = _params.minFacePx > 0 ? `&min_face_px=${_params.minFacePx}` : "";
+    data = await apiFetch(appendQs(`/api/faces/unlabeled?page=${page}&page_size=100&rel_size_min=${_params.relSizeMin}${minFacePxParam}`, dateQs()));
   } catch (e) { showError(e.message); return; }
 
   const app = document.getElementById("app");
